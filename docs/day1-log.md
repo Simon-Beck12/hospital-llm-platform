@@ -144,3 +144,64 @@ $ ps -o pid,comm -p 7021,7140,15809,7980
    7980 steamwebhelper
   15809 obsidian
 ```
+
+## 2단계 계정과 모델
+
+| 항목 | 기준 | 실측 | 판정 |
+|---|---|---|---|
+| admin 그룹 | sudo, llm-admins, docker 포함 | sudo, docker, llm-admins, users | 통과 |
+| researcher_a 그룹 | llm-users 포함, sudo·docker 없음 | llm-users, users | 통과 |
+| researcher_b 그룹 | llm-users 포함, sudo·docker 없음 | llm-users, users | 통과 |
+| beck 그룹 | llm-admins 포함 | sudo, docker, llm-admins 외 | 통과 |
+| 홈 권한 | drwxr-x--- (750) | /home/admin, researcher_a, researcher_b 모두 drwxr-x--- | 통과 |
+| /srv/models 권한 | drwxrwsr-x, beck:llm-admins | drwxrwsr-x beck llm-admins | 통과 |
+| 가중치 파일 일치 | index.json weight_map과 diff 없음 | 5개 일치 (model-0000{1..5}-of-00005), config/tokenizer/generation_config 존재 | 통과 |
+| 모델 크기 | 15~17G | 16G (du -sh), 16,397,465,974 bytes | 통과 |
+| 다운로드 소요 시간 | 30분 이내 | 약 4분 (20:44:30 시작 → 20:48:34 로그 마지막 기록) | 통과 |
+| 서버 IP | 조회됨 | enp6s0 172.30.1.44/24 | 통과 |
+
+메모
+- hf CLI: huggingface_hub 2.4.0 (`uv tool install`, `hf version` → version=2.4.0). 2.4.0에는 `[cli]` extra가 없어 경고가 났지만 hf는 설치됨.
+- 다운로드 PID 138853, 토큰 없이 받음. 로그에 `.gitignore.lock` 대기 메시지(0.1초)가 있었으나 오류 없이 끝남.
+- 서버 IP 목록의 br-e5378fa6218e(172.18.0.1), docker0(172.17.0.1)는 Docker 브리지다.
+
+### 원본 출력
+
+```text
+$ for u in beck admin researcher_a researcher_b; do id "$u"; done
+uid=1000(beck) gid=1000(beck) groups=1000(beck),4(adm),24(cdrom),27(sudo),30(dip),46(plugdev),100(users),114(lpadmin),984(docker),1001(llm-admins)
+uid=1003(admin) gid=1003(admin) groups=1003(admin),27(sudo),100(users),984(docker),1001(llm-admins)
+uid=1004(researcher_a) gid=1004(researcher_a) groups=1004(researcher_a),100(users),1002(llm-users)
+uid=1005(researcher_b) gid=1005(researcher_b) groups=1005(researcher_b),100(users),1002(llm-users)
+
+$ ls -ld /home/admin /home/researcher_a /home/researcher_b
+drwxr-x--- 2 admin        admin        4096 11월 23 20:41 /home/admin
+drwxr-x--- 2 researcher_a researcher_a 4096 11월 23 20:42 /home/researcher_a
+drwxr-x--- 2 researcher_b researcher_b 4096 11월 23 20:42 /home/researcher_b
+
+$ ls -ld /srv/models
+drwxrwsr-x 2 beck llm-admins 4096 11월 23 20:43 /srv/models
+
+$ cd /srv/models/Qwen3-8B
+$ jq -r '.weight_map[]' model.safetensors.index.json | sort -u > /tmp/expected.txt
+$ ls *.safetensors | sort > /tmp/actual.txt
+$ diff /tmp/expected.txt /tmp/actual.txt && echo "가중치 파일 일치"
+가중치 파일 일치
+$ cat /tmp/actual.txt
+model-00001-of-00005.safetensors
+model-00002-of-00005.safetensors
+model-00003-of-00005.safetensors
+model-00004-of-00005.safetensors
+model-00005-of-00005.safetensors
+$ ls config.json tokenizer.json generation_config.json
+config.json
+generation_config.json
+tokenizer.json
+$ du -sh .
+16G	.
+
+$ ip -4 -brief addr | grep -v '^lo'
+enp6s0           UP             172.30.1.44/24 
+br-e5378fa6218e  UP             172.18.0.1/16 
+docker0          DOWN           172.17.0.1/16 
+```
