@@ -205,3 +205,104 @@ enp6s0           UP             172.30.1.44/24
 br-e5378fa6218e  UP             172.18.0.1/16 
 docker0          DOWN           172.17.0.1/16 
 ```
+
+## 3단계 SSH 키 접속과 비밀번호 차단
+
+| 항목 | 기준 | 실측 | 판정 |
+|---|---|---|---|
+| ssh 서비스 | active | ssh active, ssh.socket active | 통과 |
+| 22번 포트 | LISTEN | 0.0.0.0:22, [::]:22 LISTEN | 통과 |
+| passwordauthentication | no | no (sshd -T, 10-hardening.conf) | 통과 |
+| kbdinteractiveauthentication | no | no | 통과 |
+| permitrootlogin | no | no | 통과 |
+| allowgroups | llm-admins llm-users | llm-admins, llm-users (sshd -T는 그룹마다 한 줄씩 출력) | 통과 |
+| maxauthtries | 3 | 3 | 통과 |
+| localhost 비밀번호 로그인 | Permission denied (publickey) | beck@localhost: Permission denied (publickey). 종료 코드 255 | 통과 |
+| 노트북 키 로그인 | key-login-ok | key-login-ok | 통과 |
+| 노트북 비밀번호 로그인 | Permission denied (publickey) | beck@172.30.1.44: Permission denied (publickey). | 통과 |
+| researcher_a docker 접근 | permission denied | permission denied ... docker.sock | 통과 |
+| 노트북 키 로그인 계정 수 | 4 (beck, admin, researcher_a, researcher_b) | 4 (whoami 출력 4개) | 통과 |
+| sshd 로그 Accepted publickey 계정 수 | 4 | 4 (beck 3회, researcher_a 2회, admin 1회, researcher_b 1회) | 통과 |
+
+서버 호스트 키 지문(ED25519): SHA256:G9IN8lsHyGiOmvHi2ok1LJk0X8omyyiB4YlXKc+PUB8
+
+### 메모
+- 노트북에서 scp할 때 Windows 한국어 입력기 때문에 비밀번호 입력이 실패했다. 영어 입력기로 바꾸고 beck 비밀번호를 재설정해서 해결했다.
+- sshd 로그의 Failed password 7건(21:48~22:45)은 10-hardening.conf 작성 시각(23:08) 이전 기록이다.
+- 로그의 원격 포트 번호는 `port *`로 지웠다.
+
+### 원본 출력
+
+```text
+$ systemctl is-active ssh ssh.socket
+active
+active
+(exit=0)
+
+$ ss -tlnp 2>/dev/null | grep ':22 '
+LISTEN 0      4096         0.0.0.0:22         0.0.0.0:*                                       
+LISTEN 0      4096            [::]:22            [::]:*                                       
+(exit=0)
+
+$ ls -l /etc/ssh/sshd_config.d/
+합계 4
+-rw-r--r-- 1 root root 208 11월 23 23:08 10-hardening.conf
+(exit=0)
+
+$ cat /etc/ssh/sshd_config.d/10-hardening.conf
+# 키 인증만 허용, root 차단, 두 그룹만 접속
+PubkeyAuthentication yes
+PasswordAuthentication no
+KbdInteractiveAuthentication no
+PermitRootLogin no
+AllowGroups llm-admins llm-users
+MaxAuthTries 3
+(exit=0)
+
+$ ssh -o BatchMode=yes -o PubkeyAuthentication=no -o PreferredAuthentications=password -o StrictHostKeyChecking=accept-new beck@localhost true
+beck@localhost: Permission denied (publickey).
+(exit=255)
+
+$ journalctl -u ssh --since "2 hours ago" --no-pager | grep -Ei "Accepted publickey|Failed|Disconnected" | tail -20
+11월 23 21:48:10 beck sshd[163232]: Failed password for beck from 172.30.1.34 port * ssh2
+11월 23 21:48:14 beck sshd[163232]: Failed password for beck from 172.30.1.34 port * ssh2
+11월 23 21:49:44 beck sshd[163654]: Failed password for beck from 172.30.1.34 port * ssh2
+11월 23 21:49:48 beck sshd[163654]: Failed password for beck from 172.30.1.34 port * ssh2
+11월 23 21:49:52 beck sshd[163654]: Failed password for beck from 172.30.1.34 port * ssh2
+11월 23 22:40:25 beck sshd[180261]: Failed password for beck from 172.30.1.34 port * ssh2
+11월 23 22:45:44 beck sshd[182874]: Failed password for beck from 127.0.0.1 port * ssh2
+11월 23 22:52:12 beck sshd[186253]: Accepted publickey for beck from 172.30.1.34 port * ssh2: ED25519 SHA256:of0UT7dZcYDT9794z76I/2kERfPne7tHdUpV+J6It0M
+11월 23 22:52:18 beck sshd[186324]: Accepted publickey for admin from 172.30.1.34 port * ssh2: ED25519 SHA256:88aWABPukuqrSlI8228BzsCCZmg0PRB8La8ewEwBT5g
+11월 23 22:52:18 beck sshd[186631]: Accepted publickey for researcher_a from 172.30.1.34 port * ssh2: ED25519 SHA256:7cmJSpM20BoppPTdlnuV78j6EKtuEeLOTsv9/s7c5Ig
+11월 23 22:55:26 beck sshd[188481]: Accepted publickey for researcher_b from 172.30.1.34 port * ssh2: ED25519 SHA256:ewdNGlCy8BZ6/prq9pOWlIGMrRShBBJzmyKASQBReSA
+11월 23 23:10:53 beck sshd[193405]: Accepted publickey for beck from 172.30.1.34 port * ssh2: ED25519 SHA256:of0UT7dZcYDT9794z76I/2kERfPne7tHdUpV+J6It0M
+11월 23 23:16:52 beck sshd[195738]: Accepted publickey for beck from 172.30.1.34 port * ssh2: ED25519 SHA256:of0UT7dZcYDT9794z76I/2kERfPne7tHdUpV+J6It0M
+11월 23 23:17:43 beck sshd[196201]: Accepted publickey for researcher_a from 172.30.1.34 port * ssh2: ED25519 SHA256:7cmJSpM20BoppPTdlnuV78j6EKtuEeLOTsv9/s7c5Ig
+
+$ ssh-keygen -lf /etc/ssh/ssh_host_ed25519_key.pub
+256 SHA256:G9IN8lsHyGiOmvHi2ok1LJk0X8omyyiB4YlXKc+PUB8 root@beck (ED25519)
+
+[붙여넣기: 사용자 제공 노트북·sudo 출력]
+(⑤ sudo sshd -T 출력)
+maxauthtries 3
+permitrootlogin no
+passwordauthentication no
+kbdinteractiveauthentication no
+allowgroups llm-admins
+allowgroups llm-users
+
+(④ 노트북 키 로그인 whoami)
+beck
+admin   (패스프레이즈 입력 후)
+researcher_a
+researcher_b
+
+(⑥ 노트북 출력)
+PS> ssh llm-me "echo key-login-ok"
+key-login-ok
+PS> ssh -o PubkeyAuthentication=no -o PreferredAuthentications=password llm-me
+beck@172.30.1.44: Permission denied (publickey).
+PS> ssh llm-researcher-a "groups; docker ps"
+researcher_a users llm-users
+permission denied while trying to connect to the docker API at unix:///var/run/docker.sock
+```
