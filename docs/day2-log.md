@@ -171,3 +171,81 @@ INFO:     Waiting for application shutdown.
 INFO:     Application shutdown complete.
 INFO:     Finished server process [117809]
 ```
+
+## 3단계 PII 마스킹
+
+규칙 (적용 순서: rrn → phone → mrn → email)
+
+| 종류 | 패턴 요약 | 자리표시자 | 한계 |
+|---|---|---|---|
+| rrn (주민·외국인등록번호) | 생년월일 6자리(월 01~12, 일 01~31) + 하이픈 선택 + [1-8] + 6자리 | [주민번호] | 하이픈 대신 공백·점을 쓴 번호는 못 가린다. 2월 30일 같은 없는 날짜도 가린다 |
+| phone | 휴대 01[016789]-?\d{3,4}-?\d{4}, 유선 (02\|0[3-6][1-5])-?\d{3,4}-?\d{4} | [전화번호] | 공백·점 구분, 국가번호(+82)는 못 가린다. 0으로 시작하는 10~11자리 숫자는 오탐 가능 |
+| mrn (환자번호) | (환자번호\|등록번호\|MRN) + 선택 공백·콜론(: ：) + 숫자 6~10자리. 키워드는 남긴다 | [환자번호] | 키워드 없는 환자번호, 키워드와 숫자 사이에 다른 단어가 있으면 못 가린다 |
+| email | 로컬부@도메인.최상위(영문 2자 이상) | [이메일] | 한글 도메인, 난독화(at, dot)는 못 가린다 |
+
+공통 한계
+- 숫자 경계는 \b 대신 (?<!\d), (?!\d)를 쓴다. 한글이 바로 붙어도 맞는다.
+- messages의 content(문자열, type "text" 항목)만 가린다. tools, 함수 인자, 다른 필드는 가리지 않는다.
+- 응답(모델 출력)은 가리지 않는다.
+- 이름, 주소, 진단명 같은 자유 서술 PII는 정규식으로 잡지 않는다.
+
+| 항목 | 기준 | 실측 | 판정 |
+|---|---|---|---|
+| ruff | 오류 0건 | All checks passed | 통과 |
+| pytest | 전부 통과 (기존 16 + 새) | 38 passed (새 22: 마스킹 19, proxy 3) | 통과 |
+| 가려야 함 | 12개 모두 가림 | 12/12 | 통과 |
+| 가리면 안 됨 | 5개 모두 그대로 | 5/5 | 통과 |
+| 건수 검사 | rrn 1, phone 1, mrn 1, 총 3 | rrn 1, phone 1, mrn 1, email 0, 총 3 | 통과 |
+| 실제 X-PII-Masked | 3 | 3 | 통과 |
+| 모델 답 | 자리표시자가 보임 | "주민번호 [주민번호], 전화 [전화번호], 환자번호: [환자번호]" | 통과 |
+| 응답 원본 번호 | 0건 | 0 | 통과 |
+| 게이트웨이 로그 원본 번호 | 0건 | 0 (종료 후 다시 검색해도 0) | 통과 |
+
+구성
+- app/masking.py: mask_text(), mask_messages()(deepcopy 후 가림, 원본 불변). 건수는 rrn/phone/mrn/email 4개 키로 돌려준다.
+- app/config.py: pii_masking: bool = True (GATEWAY_PII_MASKING).
+- app/main.py: chat 요청의 messages를 가린 뒤 중계한다. request.state.pii_counts에 종류별 건수를 둔다.
+  미들웨어가 /v1/chat/completions 응답 헤더 X-PII-Masked에 총 건수를 넣는다. 401·400·429에도 넣는다(가리기 전이면 0).
+- 테스트에 쓴 번호는 모두 가짜다.
+
+### 원본 출력
+
+```text
+$ uv run ruff check .
+All checks passed!
+(exit=0)
+
+$ uv run pytest -q
+......................................                                   [100%]
+=============================== warnings summary ===============================
+.venv/lib/python3.12/site-packages/fastapi/testclient.py:1
+  /home/beck/바탕화면/asan/.venv/lib/python3.12/site-packages/fastapi/testclient.py:1: StarletteDeprecationWarning: Using `httpx` with `starlette.testclient` is deprecated; install `httpx2` instead.
+    from starlette.testclient import TestClient as TestClient  # noqa
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+38 passed, 1 warning in 0.30s
+(exit=0)
+
+$ uv run uvicorn app.main:app --host 127.0.0.1 --port 18080 (PID 141117)
+$ curl -s -D /tmp/h.txt -o /tmp/b.json .../v1/chat/completions (researcher_a 키, "다음 문장을 한 글자도 바꾸지 말고 그대로 따라 써줘: 주민번호 900101-1234567, 전화 010-1234-5678, 환자번호: 12345678 /no_think", max_tokens 96)
+HTTP 200 / 0.377997s
+$ grep -i '^x-pii-masked' /tmp/h.txt
+x-pii-masked: 3
+$ jq -r '.choices[0].message.content' /tmp/b.json
+주민번호 [주민번호], 전화 [전화번호], 환자번호: [환자번호]
+$ grep -cE '900101|1234-5678|12345678' /tmp/b.json || true
+0
+$ grep -cE '900101|1234-5678|12345678' /tmp/gw.log || true
+0
+
+$ cat /tmp/gw.log
+INFO:     Started server process [141121]
+INFO:     Waiting for application startup.
+INFO:     Application startup complete.
+INFO:     Uvicorn running on http://127.0.0.1:18080 (Press CTRL+C to quit)
+INFO:     127.0.0.1:37580 - "POST /v1/chat/completions HTTP/1.1" 200 OK
+INFO:     Shutting down
+INFO:     Waiting for application shutdown.
+INFO:     Application shutdown complete.
+INFO:     Finished server process [141121]
+```

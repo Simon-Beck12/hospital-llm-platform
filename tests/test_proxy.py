@@ -1,5 +1,6 @@
 """게이트웨이 중계 테스트. 업스트림(LiteLLM)은 httpx.MockTransport로 흉내 낸다."""
 
+import json
 import re
 from collections.abc import Callable, Iterator
 
@@ -175,3 +176,34 @@ def test_leading_newlines_are_stripped(client: TestClient, upstream: Upstream) -
     res = client.post("/v1/chat/completions", json=CHAT_BODY, headers={"Authorization": AUTH})
     assert res.status_code == 200
     assert res.json()["choices"][0]["message"]["content"] == "안녕\n"
+
+
+def _sent_messages(upstream: Upstream) -> list:
+    return json.loads(upstream.calls[0].content)["messages"]
+
+
+def test_pii_is_masked_before_upstream(client: TestClient, upstream: Upstream) -> None:
+    body = {"model": "qwen3-8b", "messages": [{"role": "user", "content": "주민 900101-1234567"}]}
+    res = client.post("/v1/chat/completions", json=body, headers={"Authorization": AUTH})
+    assert res.status_code == 200
+    assert res.headers["x-pii-masked"] == "1"
+    sent = json.dumps(_sent_messages(upstream), ensure_ascii=False)
+    assert "900101" not in sent
+    assert "[주민번호]" in sent
+
+
+def test_pii_in_list_content_is_masked(client: TestClient, upstream: Upstream) -> None:
+    body = {
+        "model": "qwen3-8b",
+        "messages": [{"role": "user", "content": [{"type": "text", "text": "010-1234-5678"}]}],
+    }
+    res = client.post("/v1/chat/completions", json=body, headers={"Authorization": AUTH})
+    assert res.status_code == 200
+    assert res.headers["x-pii-masked"] == "1"
+    assert _sent_messages(upstream)[0]["content"][0]["text"] == "[전화번호]"
+
+
+def test_pii_header_on_error_responses(client: TestClient, upstream: Upstream) -> None:
+    res = client.post("/v1/chat/completions", json=CHAT_BODY)
+    assert res.status_code == 401
+    assert res.headers["x-pii-masked"] == "0"

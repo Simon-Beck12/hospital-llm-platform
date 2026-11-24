@@ -8,6 +8,7 @@ class Settings(BaseSettings):
 
     litellm_base_url: str = "http://127.0.0.1:4000"
     upstream_timeout_s: float = 60.0
+    pii_masking: bool = True
 
 
 @lru_cache

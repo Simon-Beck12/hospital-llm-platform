@@ -7,12 +7,15 @@ import httpx
 from fastapi import Depends, FastAPI, Request, Response
 from fastapi.responses import JSONResponse
 
+from app.config import get_settings
 from app.identity import Identity, IdentityCache, get_identity_cache, resolve_identity
+from app.masking import mask_messages
 from app.proxy import error_body, forward, get_http_client, lifespan
 
 app = FastAPI(title="LLM Serving Gateway", lifespan=lifespan)
 
 REQUEST_ID_RE = re.compile(r"[A-Za-z0-9._-]{1,64}")
+CHAT_PATH = "/v1/chat/completions"
 
 
 class GatewayError(Exception):
@@ -37,8 +40,12 @@ async def request_id_middleware(
     incoming = request.headers.get("x-request-id", "")
     request_id = incoming if REQUEST_ID_RE.fullmatch(incoming) else uuid.uuid4().hex
     request.state.request_id = request_id
+    request.state.pii_counts = {}
     response = await call_next(request)
     response.headers["X-Request-ID"] = request_id
+    if request.url.path == CHAT_PATH:
+        # 건수만 남긴다. 401·400·429 등 오류 응답에도 넣는다(가리기 전이면 0).
+        response.headers["X-PII-Masked"] = str(sum(request.state.pii_counts.values()))
     return response
 
 
@@ -104,7 +111,7 @@ async def list_models(
     return JSONResponse(status_code=status, content=body, headers=headers)
 
 
-@app.post("/v1/chat/completions")
+@app.post(CHAT_PATH)
 async def chat_completions(
     request: Request, auth: AuthHeader, client: HttpClient, _: Identified
 ) -> JSONResponse:
@@ -116,8 +123,12 @@ async def chat_completions(
         raise GatewayError(400, "invalid_request", "본문은 JSON 객체여야 합니다")
     if body.get("stream") is True:
         raise GatewayError(400, "stream_not_supported", "stream: true는 아직 지원하지 않습니다")
+    if get_settings().pii_masking and isinstance(body.get("messages"), list):
+        masked, counts = mask_messages(body["messages"])
+        body = {**body, "messages": masked}
+        request.state.pii_counts = counts
     status, resp_body, headers = await forward(
-        client, "POST", "/v1/chat/completions", request.state.request_id, auth, json_body=body
+        client, "POST", CHAT_PATH, request.state.request_id, auth, json_body=body
     )
     if status == 200:
         strip_leading_whitespace(resp_body)
