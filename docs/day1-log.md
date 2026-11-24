@@ -392,3 +392,5 @@ srw-rw---- 1 root docker 0 11월 24 10:32 /var/run/docker.sock
 (exit=0)
 
 ```
+
+이미지 미리 받기: `docker image ls vllm/vllm-openai` → v0.33.0 35.4GB (10:54:39 시작 → 10:58:15 로그 마지막 기록, 약 4분. digest sha256:d825baf9ce4b1b6bfc5ecc7b79880c7e6748c65a72d697ce3d47607aafa84c6e)
