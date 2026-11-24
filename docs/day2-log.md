@@ -249,3 +249,93 @@ INFO:     Waiting for application shutdown.
 INFO:     Application shutdown complete.
 INFO:     Finished server process [141121]
 ```
+
+## 4단계 감사 로그
+
+3단계 확인(이 단계 시작 시 판정 표에서 읽음): X-PII-Masked 3, 응답·로그 원본 번호 0/0, pytest 38/38. 모두 통과.
+
+| 항목 | 기준 | 실측 | 판정 |
+|---|---|---|---|
+| ruff | 오류 0건 | All checks passed | 통과 |
+| pytest | 전부 통과 (기존 38 + 새 7) | 45 passed | 통과 |
+| 로그 줄 수 | 약 10줄 | 10줄 (admin 1, researcher_a 1, researcher_b 7, 키 없음 1) | 통과 |
+| researcher_b 429 | 1줄 이상, request_id 있음 | 2줄, request_id c1debc10…, f1ad339a…, error_type throttling_error | 통과 |
+| 키 없음 | status 401, user_id null | 401, null | 통과 |
+| 파일 권한 | 600 | 600 | 통과 |
+| 폴더 권한 | 700 | 700 | 통과 |
+| 키 원문 유출 | 0 | 0 / 0 / 0 | 통과 |
+| 키 해시 유출 | 0 | 0 / 0 / 0 | 통과 |
+| 본문·전화번호·Bearer 유출 | 0 | 0 | 통과 |
+| 쓰기 실패 시 요청 | 200 유지 | 200, stderr "audit write failed: FileExistsError"만 출력 | 통과 |
+
+구성
+- app/audit.py: logger "gateway.audit"(propagate=False), RotatingFileHandler 10MB × 5. 파일을 열 때마다 600, 폴더를 만들 때 700.
+  prompt_sha256()은 정규화 JSON(sort_keys, ensure_ascii=False, 구분자 최소)의 sha256. write_audit()은 예외를 삼키고 예외 이름만 stderr에 쓴다.
+- app/main.py: 미들웨어가 /v1/* 응답마다 1줄을 쓴다(/healthz 제외). 처리되지 않은 예외도 status 500으로 1줄 남긴다.
+  request.state에 identity, model, usage, prompt_sha256, error_type을 둔다. 해시는 마스킹 후 messages 기준이다.
+- app/config.py: audit_log_path, audit_log_max_bytes, audit_log_backup_count.
+- docs/security.md: 접근권한, 비밀정보, 로그, 알려진 한계.
+
+메모
+- user_id·key_alias는 식별 실패 시 "unknown" 대신 null로 기록한다(request.state.identity 기준).
+- 다른 테스트 파일도 기본 경로(logs/audit.jsonl)에 쓰므로, pytest는 GATEWAY_AUDIT_LOG_PATH를 저장소 밖으로 지정해 돌렸다.
+- 보존 90일은 가정이다. 자동 삭제는 아직 없다.
+
+### 원본 출력
+
+```text
+$ uv run ruff check .
+All checks passed!
+(exit=0)
+
+$ uv run pytest -q
+.............................................                            [100%]
+=============================== warnings summary ===============================
+.venv/lib/python3.12/site-packages/fastapi/testclient.py:1
+  /home/beck/바탕화면/asan/.venv/lib/python3.12/site-packages/fastapi/testclient.py:1: StarletteDeprecationWarning: Using `httpx` with `starlette.testclient` is deprecated; install `httpx2` instead.
+    from starlette.testclient import TestClient as TestClient  # noqa
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+45 passed, 1 warning in 0.34s
+(exit=0)
+
+$ uv run uvicorn app.main:app --host 127.0.0.1 --port 18080 (PID 160383)
+admin -> 200
+researcher_a -> 200
+$ sleep 61
+researcher_b 1 -> 200
+researcher_b 2 -> 200
+researcher_b 3 -> 200
+researcher_b 4 -> 200
+researcher_b 5 -> 200
+researcher_b 6 -> 429
+researcher_b 7 -> 429
+키 없음 -> 401
+
+$ wc -l logs/audit.jsonl
+10 logs/audit.jsonl
+$ stat -c '%a' logs/audit.jsonl logs
+600
+700
+$ jq -r '[.user_id, .status] | @tsv' logs/audit.jsonl | sort | uniq -c
+      1 	401
+      1 admin	200
+      1 researcher_a	200
+      5 researcher_b	200
+      2 researcher_b	429
+$ jq -c 'select(.status==429) | {ts, request_id, user_id, key_alias, error_type}' logs/audit.jsonl
+{"ts":"2026-11-24T06:22:21.502Z","request_id":"c1debc107a2f4580b78696e98ee291a1","user_id":"researcher_b","key_alias":"researcher_b","error_type":"throttling_error"}
+{"ts":"2026-11-24T06:22:21.516Z","request_id":"f1ad339ab4564e3eab4dc87bb61d3a0c","user_id":"researcher_b","key_alias":"researcher_b","error_type":"throttling_error"}
+$ jq -s 'group_by(.user_id) | map({user: .[0].user_id, req: length, tokens: (map(.total_tokens // 0) | add)})' logs/audit.jsonl
+[{"user":null,"req":1,"tokens":0},{"user":"admin","req":1,"tokens":51},{"user":"researcher_a","req":1,"tokens":51},{"user":"researcher_b","req":7,"tokens":105}]
+$ 유출 검사: 키 3개
+0
+0
+0
+$ grep -cE '010-1234-5678|연락 달라|Bearer' logs/audit.jsonl || true
+0
+$ 키 sha256 해시 검색 (3개)
+0
+0
+0
+```
