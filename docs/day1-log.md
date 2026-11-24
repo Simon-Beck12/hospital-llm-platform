@@ -306,3 +306,89 @@ PS> ssh llm-researcher-a "groups; docker ps"
 researcher_a users llm-users
 permission denied while trying to connect to the docker API at unix:///var/run/docker.sock
 ```
+
+## 4단계 Docker GPU 런타임
+
+| 항목 | 기준 | 실측 | 판정 |
+|---|---|---|---|
+| docker 서버 버전 | 설치됨(29.x) | 29.9.3 (apt 후보 29.10.0) | 통과 |
+| docker compose | v2 이상 | v5.7.0 | 통과 |
+| nvidia-container-toolkit | 설치됨 | 1.20.2-1 (nvidia-ctk 1.20.2) | 통과 |
+| daemon.json nvidia 런타임 | 있음 | runtimes.nvidia.path = nvidia-container-runtime | 통과 |
+| docker info Runtimes | nvidia 포함 | io.containerd.runc.v2, nvidia, runc | 통과 |
+| 컨테이너 GPU 이름 | NVIDIA GeForce RTX 5090 | NVIDIA GeForce RTX 5090 | 통과 |
+| 컨테이너 드라이버 | 호스트와 같음(580.178.04) | 580.178.04, CUDA Version 13.0 | 통과 |
+| 컨테이너 GPU 메모리 | 32607 MiB | 32607 MiB | 통과 |
+| docker.sock 권한 | root:docker, srw-rw---- | srw-rw---- root docker | 통과 |
+
+메모
+- 테스트 이미지 nvidia/cuda:12.8.1-base-ubuntu24.04를 새로 받았다.
+- `nvidia-smi | head -4`의 "write /dev/stdout: broken pipe"는 head가 4줄 뒤 파이프를 닫아서 생긴 메시지다. 오류가 아니다.
+- vLLM 이미지 미리 받기(8단계)는 사용자 승인 전이라 하지 않았다.
+
+### 원본 출력
+
+```text
+$ id -nG
+beck adm cdrom sudo dip plugdev users lpadmin docker llm-admins
+(exit=0)
+
+$ docker version --format '{{.Server.Version}}'
+29.9.3
+(exit=0)
+
+$ docker compose version
+Docker Compose version v5.7.0
+(exit=0)
+
+$ nvidia-ctk --version
+NVIDIA Container Toolkit CLI version 1.20.2
+commit: adbd28c39b60f8eb7e03115b5ac61e58703f0ce7
+(exit=0)
+
+$ dpkg -l nvidia-container-toolkit | tail -1
+ii  nvidia-container-toolkit 1.20.2-1     amd64        NVIDIA Container toolkit
+(exit=0)
+
+$ apt-cache policy docker-ce | head -3
+docker-ce:
+  설치: 5:29.9.3-1~ubuntu.24.04~noble
+  후보: 5:29.10.0-1~ubuntu.24.04~noble
+(exit=0)
+
+$ cat /etc/docker/daemon.json
+{
+    "runtimes": {
+        "nvidia": {
+            "args": [],
+            "path": "nvidia-container-runtime"
+        }
+    }
+}(exit=0)
+
+$ docker info --format '{{json .Runtimes}}' | jq 'keys'
+[
+  "io.containerd.runc.v2",
+  "nvidia",
+  "runc"
+]
+(exit=0)
+
+$ docker run --rm --gpus all nvidia/cuda:12.8.1-base-ubuntu24.04 nvidia-smi --query-gpu=name,driver_version,memory.total --format=csv
+name, driver_version, memory.total [MiB]
+NVIDIA GeForce RTX 5090, 580.178.04, 32607 MiB
+(exit=0)
+
+$ docker run --rm --gpus all nvidia/cuda:12.8.1-base-ubuntu24.04 nvidia-smi | head -4
+Tue Nov 24 01:53:36 2026       
++-----------------------------------------------------------------------------------------+
+| NVIDIA-SMI 580.178.04             Driver Version: 580.178.04     CUDA Version: 13.0     |
++-----------------------------------------+------------------------+----------------------+
+write /dev/stdout: broken pipe
+(exit=0)
+
+$ ls -l /var/run/docker.sock
+srw-rw---- 1 root docker 0 11월 24 10:32 /var/run/docker.sock
+(exit=0)
+
+```
