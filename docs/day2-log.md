@@ -339,3 +339,117 @@ $ 키 sha256 해시 검색 (3개)
 0
 0
 ```
+
+## 5a단계 게이트웨이 Docker화
+
+| 항목 | 기준 | 실측 | 판정 |
+|---|---|---|---|
+| 이미지 크기 | 기록만 | 284MB (llm-gateway:day2, python:3.12-slim + uv 0.13.6) | 기록만 |
+| 비root uid | 10001 | 10001 | 통과 |
+| 이미지 안 .env 없음 | /app에 .env 없음 | .venv, app, logs, pyproject.toml, uv.lock만 있음. .env·*.key·.git·tests 없음 | 통과 |
+| 로그 폴더 700 | drwx------ gateway | drwx------ gateway gateway. 로그 파일 600 gateway | 통과 |
+| 18080 127.0.0.1만 | 127.0.0.1:18080 | 127.0.0.1:18080 LISTEN | 통과 |
+| healthy | 3분 이내 | 약 30초 (15:28:13 starting → 15:28:43 healthy) | 통과 |
+| whoami 3/3 | admin, researcher_a, researcher_b | 3/3 일치 | 통과 |
+| PII 헤더 | x-pii-masked: 1 | x-pii-masked: 1, HTTP 200, 0.41 s | 통과 |
+| 키 없음 401 | 401 | 401 | 통과 |
+| 감사 로그 줄 수 | 5줄 | 5줄 (whoami 3, chat 1, models 401 1) | 통과 |
+| 키 유출 0 | 0 | 0 / 0 / 0. 전화번호·Bearer도 0 | 통과 |
+| pytest 통과 | 45/45, ruff 0건 | 45 passed, All checks passed | 통과 |
+
+구성
+- Dockerfile: python:3.12-slim + uv 0.13.6, uv sync --frozen --no-dev --no-install-project, 비root gateway(uid 10001), HEALTHCHECK /healthz.
+- .dockerignore: .env·키·.git·logs·tests·docs 등을 빌드 컨텍스트에서 뺀다(컨텍스트 110.74kB).
+- compose.yaml: gateway 서비스(127.0.0.1:18080→8080, backend 망, http://litellm:4000)와 auditlogs 볼륨만 추가했다. 기존 서비스 정의는 그대로다.
+- tests/conftest.py: 모든 테스트의 감사 로그를 tmp_path로 보낸다. 실행 후 저장소 logs/audit.jsonl 크기·수정 시각이 그대로인 것을 확인했다.
+- vllm, litellm, litellm-db는 재시작하지 않았다(StartedAt 전후 동일).
+
+메모
+- 이미지 안에 /app/app/__pycache__가 들어갔다. .dockerignore의 `__pycache__/`는 컨텍스트 최상위에만 맞는다. 하위 폴더까지 빼려면 `**/__pycache__`가 필요하다.
+- 컨테이너 감사 로그의 client_ip가 172.19.0.1(Docker 브리지)로 기록된다. 호스트 포트 포워딩을 거치면 실제 요청자 IP가 보이지 않는다.
+
+### 원본 출력
+
+```text
+$ docker image ls llm-gateway:day2 --format '{{.Size}}'
+284MB
+
+$ docker compose up -d --no-deps gateway
+ Volume llm-platform_auditlogs Creating 
+ Volume llm-platform_auditlogs Creating 
+ Volume llm-platform_auditlogs Created 
+ Volume llm-platform_auditlogs Created 
+ Container llm-gateway Creating 
+ Container llm-gateway Created 
+ Container llm-gateway Starting 
+ Container llm-gateway Started 
+(exit=0)
+[15:28:13] Up Less than a second (health: starting)
+[15:28:43] Up 30 seconds (healthy)
+
+$ docker compose exec gateway id -u
+10001
+(exit=0)
+
+$ docker compose exec gateway ls -a /app
+.
+..
+.venv
+app
+logs
+pyproject.toml
+uv.lock
+(exit=0)
+
+$ docker compose exec gateway sh -c 'ls -ld /app/logs'
+drwx------ 2 gateway gateway 4096 Nov 24 06:28 /app/logs
+(exit=0)
+
+$ ss -tlnH | grep ':18080 '
+LISTEN 0      4096       127.0.0.1:18080 0.0.0.0:*
+(exit=0)
+
+$ docker compose ps --format '{{.Name}}\t{{.Status}}'
+litellm	Up 3 hours
+litellm-db	Up 3 hours (healthy)
+llm-gateway	Up 37 seconds (healthy)
+vllm	Up 2 hours (healthy)
+(exit=0)
+
+$ for u in admin researcher_a researcher_b; do curl .../v1/whoami | jq -c {user_id}; done
+{"user_id":"admin"}
+{"user_id":"researcher_a"}
+{"user_id":"researcher_b"}
+
+$ curl -s -D /tmp/h.txt -o /tmp/b.json .../v1/chat/completions (researcher_a 키, "전화 010-1234-5678 문장을 한 줄로 요약해줘. /no_think", max_tokens 48)
+time_total=0.409181s
+$ grep -iE '^(HTTP|x-request-id|x-pii-masked)' /tmp/h.txt; jq -r '.choices[0].message.content' /tmp/b.json
+HTTP/1.1 200 OK
+x-request-id: 87055ea5b9984c88b5e4a1cf294ba6ea
+x-pii-masked: 1
+전화번호로 문장을 한 줄로 요약하면 다음과 같습니다:
+
+"전화번호를 통해 문장을 전달합니다."
+
+키 없음 -> 401
+
+$ docker compose exec gateway sh -c 'wc -l /app/logs/audit.jsonl; tail -1 /app/logs/audit.jsonl' | head -c 1200
+5 /app/logs/audit.jsonl
+{"ts": "2026-11-24T06:29:06.565Z", "request_id": "cf3a0f4b3849427095d49fca2456ef2e", "user_id": null, "key_alias": null, "method": "GET", "path": "/v1/models", "status": 401, "latency_ms": 0, "model": null, "prompt_tokens": null, "completion_tokens": null, "total_tokens": null, "pii_counts": {}, "pii_total": 0, "prompt_sha256": null, "error_type": "missing_api_key", "client_ip": "172.19.0.1"}
+
+$ 키 3개 grep -cF (0이면 종료 코드 1)
+0
+0
+0
+$ docker compose exec gateway sh -c 'stat -c "%a %U" /app/logs/audit.jsonl'
+600 gateway
+$ grep -cE '010-1234-5678|Bearer' (컨테이너 감사 로그)
+0
+
+$ uv run ruff check .
+All checks passed!
+(exit=0)
+$ uv run pytest -q
+45 passed, 1 warning in 0.31s
+(exit=0)
+```
