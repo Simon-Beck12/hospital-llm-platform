@@ -494,3 +494,115 @@ postgres:16.16 667MB
 (exit=0)
 
 ```
+
+## 7단계 기동과 검증
+
+| 항목 | 기준 | 추정 | 실측 | 판정 |
+|---|---|---|---|---|
+| LiteLLM digest 고정 | sha256 있음 | - | ghcr.io/berriai/litellm@sha256:ef798594ca3db8d81bad2e1439f536f49b71fe095ee9f20416f5e149b4e22035 | 통과 |
+| chrome·steam | 없음 | - | chrome 켜짐(695 MiB), 여유 기준 통과로 진행 | 참고 |
+| 기동 전 GPU 여유 | 28000 MiB 이상 | - | 31066 MiB (점검 시), 31095 MiB (기동 직전) | 통과 |
+| vllm 상태 | healthy | - | Up (healthy), 재시작 0회 | 통과 |
+| litellm-db 상태 | healthy | - | Up (healthy), 재시작 0회 | 통과 |
+| litellm 상태 | Up | - | Up, 재시작 0회 | 통과 |
+| 기동 소요 | 2~5분 | 2~5분 | 약 2.9분 (12:54:10 → 12:57:05). vLLM 엔진 초기화 132.67 s | 통과 |
+| GPU KV cache 토큰 | 약 70,000 | 약 70,000 | 69,120 | 통과 |
+| 최대 동시 요청(8192 길이) | 약 8 | 약 8 | 8.44 | 통과 |
+| 기동 후 GPU 사용 | 27~28 GB | 27~28 GB | 28090 MiB (27.4 GiB, 데스크톱 약 1.5 GiB 포함) | 통과 |
+| /v1/models | qwen3-8b | - | qwen3-8b | 통과 |
+| 첫 응답 | HTTP 200, 한국어 | - | HTTP 200, 한국어 한 문장 | 통과 |
+| 첫 응답 지연 | 기록만 | - | 0.73 s (prompt 27, completion 50, total 77 토큰) | 기록만 |
+| 4000 포트 | 127.0.0.1만 | - | 127.0.0.1:4000 LISTEN | 통과 |
+| vllm 호스트 포트 | 없음 | - | docker port vllm 출력 없음 | 통과 |
+
+추정과 실측이 20% 넘게 차이 나는 항목은 없다. KV cache 1.3%, 동시 요청 5.5%, GPU 사용은 27~28 범위 안이다.
+
+메모
+- 사용자 결정으로 chrome을 켠 채 진행했다. chrome 판정은 참고로만 기록했고, GPU 여유 28000 MiB 기준만 적용했다.
+- 답변 앞에 빈 `<think>\n\n</think>` 블록이 붙는다. vLLM에 reasoning parser를 설정하지 않아서다.
+- vLLM 로그 안내: CUDA graph 메모리 프로파일링 때문에 0.85는 예전 기준 0.8362에 해당한다. 같은 KV cache 크기를 원하면 0.8638을 쓰라고 안내한다. 설정은 바꾸지 않았다.
+- 모델 가중치 로딩 15.27 GiB, KV cache 9.49 GiB, CUDA graph 캡처 56 s + 54 s.
+
+참고: 기존 컨테이너
+
+```text
+frappe_docker: 전체 11, 실행 9, 정지 2
+(없음): 전체 4, 실행 0, 정지 4
+llm-platform: 기동 전 0개
+
+frappe 외 컨테이너 (이름, 이미지, 상태):
+great_faraday	hello-world	Exited (0) 2 weeks ago
+lucid_blackburn	hello-world	Exited (0) 2 weeks ago
+busy_clarke	hello-world	Exited (0) 2 weeks ago
+hardcore_meninsky	hello-world	Exited (0) 2 weeks ago
+```
+
+### 원본 출력
+
+```text
+$ date +%T
+12:54:10
+$ docker compose up -d
+ Network llm-platform_backend Creating 
+ Volume llm-platform_pgdata Creating 
+ Volume llm-platform_pgdata Creating 
+ Network llm-platform_backend Creating 
+ Volume llm-platform_pgdata Created 
+ Volume llm-platform_pgdata Created 
+ Network llm-platform_backend Created 
+ Network llm-platform_backend Created 
+ Container vllm Creating 
+ Container litellm-db Creating 
+ Container litellm-db Created 
+ Container vllm Created 
+ Container litellm Creating 
+ Container litellm Created 
+ Container vllm Starting 
+ Container litellm-db Starting 
+ Container vllm Started 
+ Container vllm Waiting 
+ Container litellm-db Started 
+ Container litellm-db Waiting 
+ Container litellm-db Healthy 
+ Container vllm Healthy 
+ Container litellm Starting 
+ Container litellm Started 
+(exit=0)
+
+[12:57:05]
+litellm	Up 6 seconds
+litellm-db	Up 2 minutes (healthy)
+vllm	Up 2 minutes (healthy)
+완료 12:57:05
+
+$ docker compose logs vllm | grep -iE "KV cache|maximum concurrency|Application startup complete" | tail -5
+vllm  | (EngineCore pid=216) INFO 11-24 03:56:00 [gpu_worker.py:787] CUDA graph memory profiling is enabled (default since v0.21.0). The current --gpu-memory-utilization=0.8500 is equivalent to --gpu-memory-utilization=0.8362 without CUDA graph memory profiling. To maintain the same effective KV cache size as before, increase --gpu-memory-utilization to 0.8638. To disable, set VLLM_MEMORY_PROFILER_ESTIMATE_CUDAGRAPHS=0.
+vllm  | (EngineCore pid=216) INFO 11-24 03:56:00 [kv_cache_utils.py:1147] GPU KV cache size: 69,120 tokens, Maximum concurrency for 8,192 tokens per request: 8.44x
+vllm  | (EngineCore pid=216) INFO 11-24 03:56:55 [gpu_worker.py:1066] Free memory on device (29.34/31.32 GiB) on startup. Desired GPU memory utilization is (0.85, 26.63 GiB). Actual usage is 15.51 GiB for consumed memory (weights + non-torch), 1.62 GiB for peak activation, and 0.18 GiB for CUDAGraph memory. Replace gpu_memory_utilization config with `--kv-cache-memory=9844615680` (9.17 GiB) to fit into requested memory, or `--kv-cache-memory=12764752384` (11.89 GiB) to fully utilize gpu memory. Current kv cache memory in use is 9.49 GiB.
+vllm  | (EngineCore pid=216) INFO 11-24 03:56:56 [core.py:405] init engine (profile, create kv cache, warmup model) took 132.67 s (compilation: 16.68 s)
+vllm  | INFO:     Application startup complete.
+$ nvidia-smi --query-gpu=memory.used,memory.total,temperature.gpu,power.draw --format=csv,noheader
+28090 MiB, 32607 MiB, 39, 43.78 W
+
+$ curl -s http://127.0.0.1:4000/v1/models -H "Authorization: Bearer $K" | jq -r '.data[].id'
+qwen3-8b
+
+$ curl -s -o /tmp/day1_chat.json -w "HTTP %{http_code} / %{time_total}s\n" http://127.0.0.1:4000/v1/chat/completions -H "Authorization: Bearer $K" ... (서울의 수도 기능을 한 문장으로 설명해줘. /no_think, max_tokens 128)
+HTTP 200 / 0.725611s
+
+$ jq '{answer: .choices[0].message.content, usage: .usage}' /tmp/day1_chat.json
+{
+  "answer": "<think>\n\n</think>\n\n서울은 대한민국의 수도로서 정부, 의회, 주요 정책 결정 기관이 위치해 있으며, 국가의 정치, 경제, 문화적 중심지로 기능하고 있습니다.",
+  "usage": {
+    "completion_tokens": 50,
+    "prompt_tokens": 27,
+    "total_tokens": 77
+  }
+}
+
+$ ss -tlnH | grep ':4000 '
+LISTEN 0      4096       127.0.0.1:4000  0.0.0.0:*
+
+$ docker port vllm || echo "vllm 호스트 포트 없음"
+(docker port vllm은 출력 없이 종료 코드 0으로 끝나 echo가 실행되지 않음)
+```
