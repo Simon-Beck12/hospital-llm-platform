@@ -83,8 +83,28 @@ services:
     networks: [backend]
     logging: *default-logging
 
+  gateway:
+    build: .
+    image: llm-gateway:day2
+    container_name: llm-gateway
+    restart: unless-stopped
+    environment:
+      GATEWAY_LITELLM_BASE_URL: http://litellm:4000
+      GATEWAY_AUDIT_LOG_PATH: /app/logs/audit.jsonl
+      GATEWAY_PII_MASKING: "true"
+    volumes:
+      - auditlogs:/app/logs
+    ports:
+      - "127.0.0.1:18080:8080"
+    depends_on:
+      litellm:
+        condition: service_started
+    networks: [backend]
+    logging: *default-logging
+
 networks:
   backend:
 
 volumes:
   pgdata:
+  auditlogs:
