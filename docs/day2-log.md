@@ -453,3 +453,171 @@ $ uv run pytest -q
 45 passed, 1 warning in 0.31s
 (exit=0)
 ```
+
+## 5b단계 오류 재현과 비밀정보 검사
+
+| 항목 | 기준 | 실측 | 판정 |
+|---|---|---|---|
+| __pycache__ 제외 | 이미지 안 0개 | 0 (.dockerignore에 **/__pycache__, **/*.key 추가 후 재빌드, healthy 30초) | 통과 |
+| 401a 키 없음 | 401, 감사 로그에서 찾음 | 401 missing_api_key, aa079d77… 찾음 | 통과 |
+| 401b 잘못된 키 | 401, 감사 로그에서 찾음 | 401 token_not_found_in_db, b79f499f… 찾음 | 통과 |
+| 429 | 429, 감사 로그에서 찾음 | 1~5 200, 6번째부터 429 throttling_error, Retry-After 60, 4cc2d8cf… 찾음 | 통과 |
+| 502 | 502, 감사 로그에서 찾음 | 502 upstream_unavailable, 79cb868c… 찾음(user_id null) | 통과 |
+| litellm 복구 | 3분 이내, researcher_a 200 | 20초, 200 | 통과 |
+| 504 | 504 upstream_timeout, 약 0.5초 | 504, 0.54 s, latency_ms 518, 7e066202… | 통과 |
+| gw-timeout-test 정리 | 없음 | 없음 | 통과 |
+| gitleaks | 유출 0건, 종료 코드 0 | 첫 실행 1건(오탐: 문서의 가짜 키 sk-wrong) → .gitleaksignore 등록 후 0건, 종료 코드 0 | 통과 |
+| 실제 비밀값 이력 검사 | 0 | 키 3개 0/0/0, .env 비밀값 3개 0/0/0 (git log --all -p) | 통과 |
+| 컨테이너 | 4개 | vllm, litellm-db, litellm, llm-gateway | 통과 |
+| ruff / pytest | 0건 / 45/45 | All checks passed / 45 passed | 통과 |
+
+메모
+- 오류별 재현 방법, 요청 ID, 추적 경로, 조치는 docs/api-errors.md에 정리했다.
+- LiteLLM 로그에는 요청 ID가 없다. 시각과 게이트웨이 컨테이너 IP(172.19.0.5)로 맞췄다.
+- 504 뒤에도 vLLM은 chat 요청을 끝까지 처리했다(vLLM 로그 200). 타임아웃은 GPU 작업을 멈추지 않는다.
+- vllm·litellm-db는 이 단계 작업 중 재시작하지 않았다. 다만 사용자 응답을 기다리는 동안 18:05:28~18:06:19에 컨테이너 4개가 새로 시작됐다(재시작 횟수 0, 재부팅·Docker 데몬 재시작 아님, frappe는 그대로). 감사 로그는 볼륨에 남아 4개 요청 ID를 다시 찾을 수 있었다.
+- .gitleaksignore 지문: d6e2d8699c7fed0a1015ba8f1124338cf053abc4:docs/day2-log.md:curl-auth-header:61
+
+### 원본 출력 요약
+
+```text
+$ docker compose up -d --no-deps gateway
+ Container llm-gateway Recreate 
+ Container llm-gateway Recreated 
+ Container llm-gateway Starting 
+ Container llm-gateway Started 
+[15:33:01] Up Less than a second (health: starting)
+[15:33:31] Up 30 seconds (healthy)
+$ docker compose exec gateway sh -c 'find /app/app -name __pycache__ | wc -l'
+0
+
+$ [401a] curl -s -D - -o /tmp/e401a.json http://127.0.0.1:18080/v1/models
+HTTP/1.1 401 Unauthorized
+x-request-id: aa079d77e2504eb6880a5bf13288138f
+{"type":"missing_api_key","message":"Authorization: Bearer <키> 헤더가 필요합니다"}
+
+$ [401b] curl -s -D - -o /tmp/e401b.json http://127.0.0.1:18080/v1/models -H "Authorization: Bearer <가짜 키>"
+HTTP/1.1 401 Unauthorized
+x-request-id: b79f499f0f0f48a3be0b0cc14bec5f6d
+{"type":"token_not_found_in_db","message":"Authentication Error, Invalid API key provided."}
+
+$ sleep 61; [429] researcher_b 키로 chat 7회 (max_tokens 8)
+15:34:42 요청 1 -> 200
+15:34:42 요청 2 -> 200
+15:34:43 요청 3 -> 200
+15:34:43 요청 4 -> 200
+15:34:43 요청 5 -> 200
+15:34:43 요청 6 -> 429
+15:34:43 요청 7 -> 429
+첫 429: 요청 6
+HTTP/1.1 429 Too Many Requests
+retry-after: 60
+x-request-id: 4cc2d8cf93db4ebc9f23eb8a658d5be7
+{"type":"throttling_error","message":"Rate limit exceeded for api_key: <해시 가림>. Limit type: requests."}
+
+$ docker compose stop litellm
+멈춘 시각 15:34:55
+ Container litellm Stopping 
+ Container litellm Stopped 
+$ [502] curl -s -D - -o /tmp/e502.json .../v1/chat/completions (researcher_a 키)
+HTTP/1.1 502 Bad Gateway
+x-request-id: 79cb868ccbf0481eabb5eed3cb572972
+x-pii-masked: 0
+time 0.006158s
+{"type":"upstream_unavailable","message":"LiteLLM에 연결할 수 없습니다","request_id":"79cb868ccbf0481eabb5eed3cb572972"}
+$ docker compose start litellm
+다시 켠 시각 15:34:56
+ Container litellm-db Waiting 
+ Container vllm Waiting 
+ Container vllm Healthy 
+ Container litellm-db Healthy 
+ Container litellm Starting 
+ Container litellm Started 
+[15:34:56] liveliness 000
+[15:35:06] liveliness 000
+[15:35:16] liveliness 200
+복구까지: start 후 20초, stop 후 21초 (ok=1)
+$ 복구 확인: researcher_a chat 1회
+researcher_a -> 200
+
+NET=llm-platform_backend
+$ docker run -d --rm --name gw-timeout-test --network "$NET" -e GATEWAY_LITELLM_BASE_URL=http://litellm:4000 -e GATEWAY_UPSTREAM_TIMEOUT_S=0.5 -e GATEWAY_AUDIT_LOG_PATH=/app/logs/audit.jsonl -p 127.0.0.1:18081:8080 llm-gateway:day2
+a3b49a84890d
+$ [504] curl -s -D - -o /tmp/e504.json -w "time %{time_total}s\n" http://127.0.0.1:18081/v1/chat/completions (researcher_a 키, 사계절 설명, max_tokens 512)
+HTTP/1.1 504 Gateway Timeout
+x-request-id: 7e066202fd4d47a18bbdab580556abd5
+time 0.539985s
+{"type":"upstream_timeout","message":"LiteLLM 응답 시간 초과","request_id":"7e066202fd4d47a18bbdab580556abd5"}
+$ docker exec gw-timeout-test tail -1 /app/logs/audit.jsonl
+{"ts": "2026-11-24T06:35:34.235Z", "request_id": "7e066202fd4d47a18bbdab580556abd5", "user_id": "researcher_a", "key_alias": "researcher_a", "method": "POST", "path": "/v1/chat/completions", "status": 504, "latency_ms": 518, "model": "qwen3-8b", "prompt_tokens": null, "completion_tokens": null, "total_tokens": null, "pii_counts": {"rrn": 0, "phone": 0, "mrn": 0, "email": 0}, "pii_total": 0, "prompt_sha256": "382709783c95d27653fc3c5bbd2cf72657a4d0cdd235bfa08737ed128706ae08", "error_type": "upstream_timeout", "client_ip": "172.19.0.1"}
+$ docker stop gw-timeout-test
+gw-timeout-test
+
+$ [401a] docker compose exec gateway grep -F 'aa079d77e2504eb6880a5bf13288138f' /app/logs/audit.jsonl | jq -c {...}
+{"ts":"2026-11-24T06:33:41.741Z","request_id":"aa079d77e2504eb6880a5bf13288138f","user_id":null,"path":"/v1/models","status":401,"latency_ms":0,"error_type":"missing_api_key"}
+$ [401b] docker compose exec gateway grep -F 'b79f499f0f0f48a3be0b0cc14bec5f6d' /app/logs/audit.jsonl | jq -c {...}
+{"ts":"2026-11-24T06:33:41.779Z","request_id":"b79f499f0f0f48a3be0b0cc14bec5f6d","user_id":null,"path":"/v1/models","status":401,"latency_ms":28,"error_type":"token_not_found_in_db"}
+$ [429] docker compose exec gateway grep -F '4cc2d8cf93db4ebc9f23eb8a658d5be7' /app/logs/audit.jsonl | jq -c {...}
+{"ts":"2026-11-24T06:34:43.438Z","request_id":"4cc2d8cf93db4ebc9f23eb8a658d5be7","user_id":"researcher_b","path":"/v1/chat/completions","status":429,"latency_ms":6,"error_type":"throttling_error"}
+$ [502] docker compose exec gateway grep -F '79cb868ccbf0481eabb5eed3cb572972' /app/logs/audit.jsonl | jq -c {...}
+{"ts":"2026-11-24T06:34:56.587Z","request_id":"79cb868ccbf0481eabb5eed3cb572972","user_id":null,"path":"/v1/chat/completions","status":502,"latency_ms":4,"error_type":"upstream_unavailable"}
+[504] 5단계 tail 결과: request_id 7e066202fd4d47a18bbdab580556abd5, user_id researcher_a, status 504, latency_ms 518, error_type upstream_timeout
+
+$ docker compose logs --since 10m litellm | grep -iE 'error|timeout|disconnect' | tail -5
+litellm  | 06:33:41 - LiteLLM Proxy.stdout:WARNING: auth_exception_handler.py:212 - litellm.proxy.proxy_server.user_api_key_auth(): Exception occured - Authentication Error, Invalid proxy server token passed. key=<해시 가림>, not found in db. Crea
+litellm  | 06:33:41 - LiteLLM Proxy.stdout:WARNING: auth_exception_handler.py:212 - litellm.proxy.proxy_server.user_api_key_auth(): Exception occured - Authentication Error, Invalid proxy server token passed. key=<해시 가림>, not found in db. Crea
+litellm  | 2026-11-24 06:35:05,817 - litellm_proxy_extras - INFO - Preparing the Prisma CLI toolchain (timeout 600.0s)
+
+$ docker compose logs --since 10m litellm | grep -iE 'X-Request-ID|7e066202|79cb868c|4cc2d8cf' | head -3
+$ docker compose logs --since 10m litellm | grep -E 'POST /v1/chat/completions|GET /v1/models|GET /key/info' | tail -8
+litellm  | INFO:     172.19.0.5:51492 - "POST /v1/chat/completions HTTP/1.1" 200 OK
+litellm  | INFO:     172.19.0.5:51492 - "POST /v1/chat/completions HTTP/1.1" 200 OK
+litellm  | INFO:     172.19.0.5:51492 - "POST /v1/chat/completions HTTP/1.1" 200 OK
+litellm  | INFO:     172.19.0.5:51492 - "POST /v1/chat/completions HTTP/1.1" 429 Too Many Requests
+litellm  | INFO:     172.19.0.5:51492 - "POST /v1/chat/completions HTTP/1.1" 429 Too Many Requests
+litellm  | INFO:     172.19.0.5:33830 - "GET /key/info HTTP/1.1" 200 OK
+litellm  | INFO:     172.19.0.5:33830 - "POST /v1/chat/completions HTTP/1.1" 200 OK
+litellm  | INFO:     172.19.0.6:49890 - "GET /key/info HTTP/1.1" 200 OK
+$ docker compose logs --since 10m litellm | grep '172.19.0.6'
+litellm  | INFO:     172.19.0.6:49890 - "GET /key/info HTTP/1.1" 200 OK
+$ docker compose logs --since 10m vllm | grep -E 'POST /v1/chat/completions|Aborted|abort' | tail -4
+vllm  | INFO:     172.19.0.4:47302 - "POST /v1/chat/completions HTTP/1.1" 200 OK
+vllm  | INFO:     172.19.0.4:47302 - "POST /v1/chat/completions HTTP/1.1" 200 OK
+vllm  | INFO:     172.19.0.4:60410 - "POST /v1/chat/completions HTTP/1.1" 200 OK
+vllm  | INFO:     172.19.0.4:36650 - "POST /v1/chat/completions HTTP/1.1" 200 OK
+
+$ ./scripts/check_secrets.sh; echo "종료 코드 $?"
+Finding:     $ curl .../v1/models -H "Authorization: Bearer REDACTED"
+Secret:      REDACTED
+RuleID:      curl-auth-header
+Entropy:     3.000000
+File:        docs/day2-log.md
+Line:        61
+Commit:      d6e2d8699c7fed0a1015ba8f1124338cf053abc4
+Date:        2026-11-24T04:44:58Z
+Fingerprint: d6e2d8699c7fed0a1015ba8f1124338cf053abc4:docs/day2-log.md:curl-auth-header:61
+
+6:36AM INF 14 commits scanned.
+6:36AM INF scanned ~166439 bytes (166.44 KB) in 83.2ms
+6:36AM WRN leaks found: 1
+종료 코드 1
+
+$ ./scripts/check_secrets.sh; echo "종료 코드 $?"  (.gitleaksignore 적용 후)
+9:08AM INF 14 commits scanned.
+9:08AM INF scanned ~166439 bytes (166.44 KB) in 84.9ms
+9:08AM INF no leaks found
+종료 코드 0
+
+litellm	Up 2 minutes
+litellm-db	Up 3 minutes (healthy)
+llm-gateway	Up 2 minutes (healthy)
+vllm	Up 3 minutes (healthy)
+gw-timeout-test 없음
+
+$ uv run ruff check .
+All checks passed!
+(exit=0)
+$ uv run pytest -q
+45 passed, 1 warning in 0.32s
+(exit=0)
+```
