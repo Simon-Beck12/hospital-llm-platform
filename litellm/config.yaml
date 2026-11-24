@@ -1,0 +1,10 @@
+model_list:
+  - model_name: qwen3-8b
+    litellm_params:
+      model: hosted_vllm/qwen3-8b
+      api_base: http://vllm:8000/v1
+      api_key: "none"
+
+general_settings:
+  master_key: os.environ/LITELLM_MASTER_KEY
+  database_url: os.environ/DATABASE_URL
