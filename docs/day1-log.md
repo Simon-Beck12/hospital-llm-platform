@@ -394,3 +394,103 @@ srw-rw---- 1 root docker 0 11월 24 10:32 /var/run/docker.sock
 ```
 
 이미지 미리 받기: `docker image ls vllm/vllm-openai` → v0.33.0 35.4GB (10:54:39 시작 → 10:58:15 로그 마지막 기록, 약 4분. digest sha256:d825baf9ce4b1b6bfc5ecc7b79880c7e6748c65a72d697ce3d47607aafa84c6e)
+
+## 6단계 설정 파일
+
+| 항목 | 기준 | 실측 | 판정 |
+|---|---|---|---|
+| 호스트 4000 포트 | 사용 안 함 | 사용 안 함 (8080만 LISTEN, frappe) | 통과 |
+| 컨테이너 이름 충돌 | vllm, litellm, litellm-db 없음 | 이름 충돌 없음 | 통과 |
+| .env 권한(600) | 600 | 600 beck | 통과 |
+| .env 값 3개 | 3 | 3 (LITELLM_MASTER_KEY, LITELLM_SALT_KEY, POSTGRES_PASSWORD) | 통과 |
+| .env Git 제외 | git check-ignore → .env | .env | 통과 |
+| compose 문법 | config --quiet 성공 | compose 문법 OK | 통과 |
+| 서비스 수(3) | vllm, db, litellm | db, vllm, litellm | 통과 |
+| 모델 경로 | /srv/models/Qwen3-8B/config.json 존재 | 존재 | 통과 |
+| vLLM 이미지 | v0.33.0 있음 | v0.33.0 35.4GB | 통과 |
+| LiteLLM 이미지 digest | 받기 성공, digest 조회 | sha256:ef798594ca3db8d81bad2e1439f536f49b71fe095ee9f20416f5e149b4e22035 (1.9GB). postgres:16.16 667MB | 통과 |
+
+메모
+- 이 스택이 호스트에 여는 포트는 127.0.0.1:4000 하나다. 8000(vLLM), 5432(Postgres)는 backend 내부망에서만 쓴다.
+- 참고 포트: 8080은 frappe_docker-frontend-1이 0.0.0.0:8080으로 사용 중이다. 2~3일차에 8080을 쓰려면 다른 포트가 필요하다. 9090, 3000은 비어 있다.
+- .env.example에는 LITELLM_MASTER_KEY=, POSTGRES_PASSWORD=가 이미 있어 LITELLM_SALT_KEY= 한 줄만 끝에 추가했다.
+- .env 값은 openssl rand로 만들었고 이 기록에는 넣지 않았다.
+- 컨테이너는 만들지 않았다. 작업 전후 `docker ps -aq` 15개로 같다.
+
+참고: 기존 컨테이너
+
+```text
+$ ss -tlnH | awk '{print $4}' | grep -E ':(4000|5432|8000|8080|9090|3000)$'
+0.0.0.0:8080
+[::]:8080
+(exit=0)
+
+$ docker ps --format '{{.Names}}\t{{.Ports}}'
+frappe_docker-frontend-1	0.0.0.0:8080->8080/tcp, [::]:8080->8080/tcp
+frappe_docker-websocket-1	
+frappe_docker-queue-short-1	
+frappe_docker-queue-long-1	
+frappe_docker-backend-1	
+frappe_docker-scheduler-1	
+frappe_docker-redis-cache-1	6379/tcp
+frappe_docker-redis-queue-1	6379/tcp
+frappe_docker-db-1	3306/tcp
+(exit=0)
+
+$ docker ps -a --format '{{.Names}}' | grep -xE 'vllm|litellm|litellm-db' || echo '이름 충돌 없음'
+이름 충돌 없음
+(exit=0)
+
+$ docker compose ls
+NAME                STATUS              CONFIG FILES
+frappe_docker       running(9)          /home/beck/바탕화면/epr/frappe_docker/pwd.yml,/home/beck/바탕화면/epr/erpnext-ops-agent/infra/pwd.override.yml
+(exit=0)
+
+```
+
+### 원본 출력
+
+```text
+$ stat -c '%a %U' .env
+600 beck
+(exit=0)
+
+$ grep -cE '^(LITELLM_MASTER_KEY=sk-|LITELLM_SALT_KEY=sk-|POSTGRES_PASSWORD=.+)' .env
+3
+(exit=0)
+
+$ git check-ignore .env
+.env
+(exit=0)
+
+$ docker compose config --quiet && echo 'compose 문법 OK'
+compose 문법 OK
+(exit=0)
+
+$ docker compose config --services
+db
+vllm
+litellm
+(exit=0)
+
+$ ls /srv/models/Qwen3-8B/config.json
+/srv/models/Qwen3-8B/config.json
+(exit=0)
+
+$ docker image ls vllm/vllm-openai --format '{{.Tag}} {{.Size}}'
+v0.33.0 35.4GB
+(exit=0)
+
+$ docker compose pull db litellm
+(exit=0 확인, 레이어 진행 줄은 생략)
+
+$ docker image inspect ghcr.io/berriai/litellm:main-stable --format '{{index .RepoDigests 0}}'
+ghcr.io/berriai/litellm@sha256:ef798594ca3db8d81bad2e1439f536f49b71fe095ee9f20416f5e149b4e22035
+(exit=0)
+
+$ docker image ls --format '{{.Repository}}:{{.Tag}} {{.Size}}' | grep -E '^(postgres:16.16|ghcr.io/berriai/litellm:main-stable) '
+ghcr.io/berriai/litellm:main-stable 1.9GB
+postgres:16.16 667MB
+(exit=0)
+
+```
