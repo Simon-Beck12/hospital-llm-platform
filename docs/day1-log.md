@@ -606,3 +606,102 @@ LISTEN 0      4096       127.0.0.1:4000  0.0.0.0:*
 $ docker port vllm || echo "vllm 호스트 포트 없음"
 (docker port vllm은 출력 없이 종료 코드 0으로 끝나 echo가 실행되지 않음)
 ```
+
+## 8단계 계정별 키와 429
+
+| 항목 | 기준 | 실측 | 판정 |
+|---|---|---|---|
+| reasoning parser 적용 | 로그에 reasoning_parser='qwen3' | non-default args에 'reasoning_parser': 'qwen3'. 오류·OOM 0건 | 통과 |
+| 본문 think 제거 | has_think = false, 한국어 답 | has_think false, reasoning_content "\n\n", content 한국어 한 문장 | 통과 |
+| vllm 재기동 소요 | 기록만 | 약 3.0분 (13:03:41 → 13:06:43 healthy, 30초 간격 확인). litellm·litellm-db 재시작 없음 | 기록만 |
+| 키 파일 3개·권한 600 | 3개, -rw------- | 3개 모두 -rw-------, 각 sk- 1줄. ~/llm-keys 700 | 통과 |
+| admin 응답 | HTTP 200 | HTTP 200 | 통과 |
+| researcher_a 응답 | HTTP 200 | HTTP 200 | 통과 |
+| researcher_b 응답 | HTTP 200 | HTTP 200 | 통과 |
+| researcher_b 429 발생 | 6~7번째 요청 429 | 1~5번 200, 6번째부터 429 (6·7 모두 429) | 통과 |
+| 키 한도 3개 일치 | rpm/tpm 발급값과 같음 | admin 1000/1000000, researcher_a 20/20000, researcher_b 5/2000. 만료 2026-12-24 (30일) | 통과 |
+| 원격 대비 상태 | 기록만 | 작업 시작 시 뒤짐 0, 앞섬 0 | 기록만 |
+
+메모
+- compose.yaml vllm command 끝에 `--reasoning-parser qwen3` 두 줄만 추가했다.
+- 키 값은 ~/llm-keys/*.key(저장소 밖)에만 있다. 이 기록과 화면에는 넣지 않았다. 429 메시지의 api_key 해시도 가렸다.
+- 답변에 한자 "機關"이 섞여 나왔다. Qwen3 모델이 가끔 중국어 표기를 섞는다.
+- content 앞에 빈 줄 2개("\n\n")가 남는다.
+
+### 원본 출력
+
+```text
+$ git status -sb
+## feat/day1-serving...origin/feat/day1-serving
+$ git rev-list --left-right --count origin/feat/day1-serving...HEAD
+0	0
+
+$ nvidia-smi --query-gpu=memory.used,memory.total --format=csv,noheader
+28248 MiB, 32607 MiB
+$ date +%T; docker compose up -d --no-deps vllm
+13:03:41
+ Container vllm Recreate 
+ Container vllm Recreated 
+ Container vllm Starting 
+ Container vllm Started 
+(exit=0)
+
+[13:03:43] Up Less than a second (health: starting)
+[13:04:13] Up 30 seconds (health: starting)
+[13:04:43] Up About a minute (health: starting)
+[13:05:13] Up About a minute (health: starting)
+[13:05:43] Up 2 minutes (health: starting)
+[13:06:13] Up 2 minutes (health: starting)
+[13:06:43] Up 3 minutes (healthy)
+healthy 13:06:43, 180s
+
+$ docker compose logs vllm | grep -iE "reasoning|CUDA out of memory|Error" | tail -5
+vllm  | (APIServer pid=1) INFO 11-24 04:03:50 [startup.py:96] non-default args: {'model_tag': '/models/Qwen3-8B', 'model': '/models/Qwen3-8B', 'max_model_len': 8192, 'served_model_name': ['qwen3-8b'], 'reasoning_parser': 'qwen3', 'gpu_memory_utilization': 0.85}
+vllm  | (EngineCore pid=248) INFO 11-24 04:04:06 [core.py:139] Initializing a V1 LLM engine (v0.33.0) with config: model='/models/Qwen3-8B', speculative_config=None, tokenizer='/models/Qwen3-8B', skip_tokenizer_init=False, tokenizer_mode=auto, revision=None, tokenizer_revision=None, trust_remote_code=False, dtype=torch.bfloat16, max_seq_len=8192, download_dir=None, load_format=auto, tensor_parall …(생략)
+
+$ curl -s .../v1/chat/completions (마스터 키, "서울의 수도 기능을 한 문장으로 설명해줘. /no_think", max_tokens 128) | jq {content, has_think, reasoning}
+{
+  "content": "\n\n서울은 대한민국의 수도로서 정부機關, 정치, 경제, 문화, 교육의 중심지로 기능하고 있습니다.",
+  "has_think": false,
+  "reasoning": "\n\n"
+}
+
+$ ./scripts/issue_keys.sh
+발급: admin (rpm=1000, tpm=1000000) -> /home/beck/llm-keys/admin.key
+발급: researcher_a (rpm=20, tpm=20000) -> /home/beck/llm-keys/researcher_a.key
+발급: researcher_b (rpm=5, tpm=2000) -> /home/beck/llm-keys/researcher_b.key
+(exit=0)
+$ ls -l ~/llm-keys
+합계 12
+-rw------- 1 beck beck 26 11월 24 13:07 admin.key
+-rw------- 1 beck beck 26 11월 24 13:07 researcher_a.key
+-rw------- 1 beck beck 26 11월 24 13:07 researcher_b.key
+$ for u in admin researcher_a researcher_b; do grep -c '^sk-' ~/llm-keys/$u.key; done
+1
+1
+1
+
+$ for u in admin researcher_a researcher_b; do curl ... -H "Authorization: Bearer $(cat ~/llm-keys/$u.key)" ("안녕? 한 줄로 답해줘. /no_think", max_tokens 32); done
+admin -> HTTP 200
+researcher_a -> HTTP 200
+researcher_b -> HTTP 200
+13:07:16
+
+$ sleep 61
+$ for i in 1..7: researcher_b 키로 "hi /no_think" (max_tokens 8)
+13:08:23 요청 1 -> HTTP 200
+13:08:23 요청 2 -> HTTP 200
+13:08:23 요청 3 -> HTTP 200
+13:08:23 요청 4 -> HTTP 200
+13:08:23 요청 5 -> HTTP 200
+13:08:23 요청 6 -> HTTP 429
+13:08:23 요청 7 -> HTTP 429
+$ jq -r '.error.message // "없음"' /tmp/rb_7.json | head -c 300
+Rate limit exceeded for api_key: <해시 가림>. Limit type: requests. Current limit: 5, Remaining: 0. Limit resets at: 2026-11-24 04:09:23 UTC
+
+
+$ for u in admin researcher_a researcher_b; do curl -s -G .../key/info --data-urlencode "key=$(cat ~/llm-keys/$u.key)" | jq -c ".info | {key_alias, user_id, rpm_limit, tpm_limit, expires}"; done
+{"key_alias":"admin","user_id":"admin","rpm_limit":1000,"tpm_limit":1000000,"expires":"2026-12-24T04:07:10.389000+00:00"}
+{"key_alias":"researcher_a","user_id":"researcher_a","rpm_limit":20,"tpm_limit":20000,"expires":"2026-12-24T04:07:10.424000+00:00"}
+{"key_alias":"researcher_b","user_id":"researcher_b","rpm_limit":5,"tpm_limit":2000,"expires":"2026-12-24T04:07:10.443000+00:00"}
+```

@@ -20,6 +20,8 @@ services:
       - "8192"
       - --gpu-memory-utilization
       - "0.85"
+      - --reasoning-parser
+      - qwen3
     environment:
       HF_HUB_OFFLINE: "1"
     volumes:
