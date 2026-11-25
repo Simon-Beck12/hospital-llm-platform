@@ -367,3 +367,134 @@ $ Q 'nvidia_smi_temperature_gpu_tlimit'
 $ Q 'nvidia_smi_utilization_gpu_ratio'
 [{"m":{"__name__":"nvidia_smi_utilization_gpu_ratio","instance":"gpu-exporter:9835","job":"gpu","uuid":"138dd643-d4bb-f97d-9b26-d9c05720b67a"},"v":"0.07"}]
 ```
+
+## 4단계 Grafana 대시보드
+
+대시보드 "LLM 플랫폼 운영"(uid llm-platform, 폴더 LLM Platform, 새로고침 10s, 기본 범위 지난 30분). 데이터소스·대시보드는 모두 프로비저닝 파일로 올렸다(UI 수정 불가, allowUiUpdates false).
+
+패널 표 (쿼리 결과: 트래픽 후 Prometheus 즉시 쿼리, $__range → 30m)
+
+| 번호 | 행 | 제목 | PromQL | 단위 | 쿼리 결과 |
+|---|---|---|---|---|---|
+| 1 | 서비스 상태 | 수집 대상 상태(stat, 1=UP 초록, 0=DOWN 빨강) | `up` | none | 있음 (4개 모두 1) |
+| 2 | 서비스 상태 | vLLM 대기열 | `vllm:num_requests_running`, `vllm:num_requests_waiting` | short | 있음 (0, 0) |
+| 3 | 서비스 상태 | 게이트웨이 진행 중 요청(stat) | `gateway_inflight_requests` | short | 있음 (0) |
+| 4 | 지연과 처리량 | 게이트웨이 요청률(상태 코드별) | `sum by (status) (rate(gateway_requests_total[1m]))` | reqps | 있음 (200: 0.111) |
+| 5 | 지연과 처리량 | 게이트웨이 지연 p50/p95 | `histogram_quantile(0.5\|0.95, sum by (le) (rate(gateway_request_duration_seconds_bucket[5m])))` | s | 있음 (0.182 / 0.416) |
+| 6 | 지연과 처리량 | vLLM 첫 토큰 지연 p95 | `histogram_quantile(0.95, sum by (le) (rate(vllm:time_to_first_token_seconds_bucket[5m])))` | s | 있음 (0.028) |
+| 7 | 지연과 처리량 | vLLM 전체 지연 p95 | `histogram_quantile(0.95, sum by (le) (rate(vllm:e2e_request_latency_seconds_bucket[5m])))` | s | 있음 (0.285) |
+| 8 | 지연과 처리량 | 생성 처리량 | `rate(vllm:generation_tokens_total[1m])` | tok/s (suffix) | 있음 (0.889) |
+| 9 | 사용자와 보안 | 사용자별 요청 수(bargauge) | `sum by (user) (increase(gateway_requests_total[$__range]))` | short | 있음 (admin 11.2, researcher_a 11.2, researcher_b 6.1, unknown 0) |
+| 10 | 사용자와 보안 | 사용자별 토큰(bargauge) | `sum by (user) (increase(gateway_tokens_total[$__range]))` | short | 있음 (admin 529, researcher_a 529, researcher_b 137) |
+| 11 | 사용자와 보안 | 사용자별 429(bargauge) | `sum by (user) (increase(gateway_requests_total{status="429"}[$__range]))` | short | 있음, 단 값 0 (실제 2건, 아래 메모) |
+| 12 | 사용자와 보안 | PII 마스킹 건수(종류별, bargauge) | `sum by (kind) (increase(gateway_pii_masked_total[$__range]))` | short | 있음 (phone 20.4) |
+| 13 | GPU | GPU 사용률 | `nvidia_smi_utilization_gpu_ratio * 100` | percent | 있음 (4) |
+| 14 | GPU | GPU 메모리 | `nvidia_smi_memory_used_bytes / 1024^3`, `nvidia_smi_memory_total_bytes / 1024^3` | gbytes(GiB) | 있음 (28.72 / 31.84) |
+| 15 | GPU | GPU 온도·전력(왼쪽 ℃, 오른쪽 W) | `nvidia_smi_temperature_gpu`, `nvidia_smi_power_draw_watts` | celsius / watt | 있음 (40 / 61.99) |
+| 16 | GPU | KV 캐시 사용률(gauge 0~100, 80 노랑, 95 빨강) | `vllm:kv_cache_usage_perc * 100` | percent | 있음 (0) |
+
+| 항목 | 기준 | 실측 | 판정 |
+|---|---|---|---|
+| compose 문법 | OK, 추가만 | OK, 26줄 추가·삭제 0 | 통과 |
+| health | database ok, 2분 이내 | ok, 약 20초 (13.3.1). 기존 6개 재시작 없음 | 통과 |
+| 데이터소스 | 1개, uid prometheus | Prometheus / prometheus / http://prometheus:9090, health OK | 통과 |
+| 패널 16 | 16 | 16 (행 4, 단위 없는 패널 0) | 통과 |
+| 폴더 | LLM Platform | LLM Platform | 통과 |
+| 익명 401 | 401 | 401. 가입 꺼짐(disableUserSignUp true), 익명 꺼짐, 가입 API 401 | 통과 |
+| 결과 있는 패널 수 | 14 이상 | 16/16 | 통과 |
+| .env 600 | 600 | 600 (GRAFANA_ADMIN_PASSWORD 1줄 추가, 19 → 20줄) | 통과 |
+| 비밀번호 유출 0 | 0 | 0 (git grep, gitleaks) | 통과 |
+| 호스트 포트 | 127.0.0.1:3000만 | 127.0.0.1:3000 LISTEN | 통과 |
+
+메모
+- 사용자별 429 패널이 0으로 나온다. researcher_b 429 시계열이 처음 수집될 때 이미 값이 2였고(counter를 0으로 미리 만들지 않음), increase()는 첫 표본 이전 증가를 세지 않는다. raw counter `gateway_requests_total{status="429"}`는 2, unknown 401도 같은 이유로 increase 0이다.
+  고치려면 (a) 게이트웨이가 알려진 사용자·상태 조합을 0으로 미리 만들거나, (b) 패널 쿼리를 raw counter 또는 `increase(...) or 현재값` 형태로 바꿔야 한다. 이번 단계에서는 바꾸지 않았다.
+- increase()는 구간 끝을 외삽해서 정수가 아닌 값(11.222 등)이 나온다. bargauge 소수점은 0자리로 표시한다.
+- KV 캐시 부하 시 값은 5단계 Locust에서 확인한다.
+- Grafana 비밀번호는 .env에만 있고, API 확인은 권한 600 임시 netrc 파일로만 넘긴 뒤 지웠다.
+
+### 원본 출력
+
+```text
+$ stat -c '%a' .env
+600
+.env 줄 수: 19 → 20
+GRAFANA_ADMIN_PASSWORD 줄 수: 1 (32자 값)
+
+$ jq '.panels | map(select(.type != "row")) | length'
+16
+$ jq -e '.uid == "llm-platform"'
+true
+행 수: 4
+단위 없는 패널: 0
+
+$ docker compose config --quiet && echo "compose 문법 OK"
+compose 문법 OK
+$ git diff --numstat compose.yaml
+26	0	compose.yaml
+삭제 줄: 0
+
+$ docker compose up -d --no-deps grafana
+ Image grafana/grafana:13.3.1 Pulled 
+ Volume llm-platform_grafanadata Creating 
+ Volume llm-platform_grafanadata Creating 
+ Volume llm-platform_grafanadata Created 
+ Volume llm-platform_grafanadata Created 
+ Container grafana Creating 
+ Container grafana Created 
+ Container grafana Starting 
+ Container grafana Started 
+[14:45:28] 응답 없음
+[14:45:38] 응답 없음
+[14:45:48] {  "database": "ok",  "version": "13.3.1",  "commit": "da3aa3ff574e7dbbf808c66b6daa744defed0441"}
+ok=1
+
+$ curl -s --netrc-file "$NETRC" .../api/datasources | jq -c "map({name, uid, url})"
+[{"name":"Prometheus","uid":"prometheus","url":"http://prometheus:9090"}]
+$ curl -s --netrc-file "$NETRC" .../api/dashboards/uid/llm-platform | jq -c {title, panels, folder}
+{"title":"LLM 플랫폼 운영","panels":16,"folder":"LLM Platform"}
+익명 접근 -> 401
+$ 데이터소스 상태 확인 (health)
+{"status":"OK","message":"Successfully queried the Prometheus API."}
+$ 가입·익명 설정
+{"disableUserSignUp":true,"anonymousEnabled":false}
+가입 API(익명) -> 401
+
+$ 트래픽: admin·researcher_a 각 10회 chat(max_tokens 64, 전화번호 포함)
+응답 코드:      20 200 
+$ sleep 61; researcher_b 7회
+researcher_b 응답 코드: 200 200 200 200 200 429 429
+$ sleep 30
+$ 패널별 쿼리 결과 ($__range → 30m)
+수집 대상 상태	4	[{"m":{},"v":1},{"m":{},"v":1},{"m":{},"v":1},{"m":{},"v":1}]
+vLLM 대기열	1	[{"m":{},"v":0}]
+vLLM 대기열	1	[{"m":{},"v":0}]
+게이트웨이 진행 중 요청	1	[{"m":{},"v":0}]
+게이트웨이 요청률(상태 코드별)	3	[{"m":{"status":"200"},"v":0.111},{"m":{"status":"401"},"v":0},{"m":{"status":"429"},"v":0}]
+게이트웨이 지연 p50/p95	1	[{"m":{},"v":0.182}]
+게이트웨이 지연 p50/p95	1	[{"m":{},"v":0.416}]
+vLLM 첫 토큰 지연 p95	1	[{"m":{},"v":0.028}]
+vLLM 전체 지연 p95	1	[{"m":{},"v":0.285}]
+생성 처리량	1	[{"m":{},"v":0.889}]
+사용자별 요청 수	4	[{"m":{"user":"admin"},"v":11.222},{"m":{"user":"researcher_a"},"v":11.222},{"m":{"user":"researcher_b"},"v":6.121},{"m":{"user":"unknown"},"v":0}]
+사용자별 토큰	3	[{"m":{"user":"admin"},"v":529.489},{"m":{"user":"researcher_a"},"v":529.489},{"m":{"user":"researcher_b"},"v":136.708}]
+사용자별 429	1	[{"m":{"user":"researcher_b"},"v":0}]
+PII 마스킹 건수(종류별)	1	[{"m":{"kind":"phone"},"v":20.405}]
+GPU 사용률	1	[{"m":{},"v":4}]
+GPU 메모리	1	[{"m":{},"v":28.718}]
+GPU 메모리	1	[{"m":{},"v":31.843}]
+GPU 온도·전력	1	[{"m":{},"v":40}]
+GPU 온도·전력	1	[{"m":{},"v":61.99}]
+KV 캐시 사용률	1	[{"m":{},"v":0}]
+
+$ Q 'gateway_requests_total{status="429"}'
+[{"m":{"user":"researcher_b","status":"429"},"v":"2"}]
+$ Q 'count_over_time(gateway_requests_total{status="429"}[30m])'
+[{"m":{"user":"researcher_b","status":"429"},"v":"4"}]
+$ Q 'min_over_time(gateway_requests_total{status="429"}[30m])'
+[{"m":{"user":"researcher_b","status":"429"},"v":"2"}]
+$ Q 'gateway_requests_total{status="401"}'
+[{"m":{"user":"unknown","status":"401"},"v":"1"}]
+$ Q 'increase(gateway_requests_total{status="401"}[30m])'
+[{"m":{"user":"unknown","status":"401"},"v":"0"}]
+```
