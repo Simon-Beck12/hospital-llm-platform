@@ -498,3 +498,109 @@ $ Q 'gateway_requests_total{status="401"}'
 $ Q 'increase(gateway_requests_total{status="401"}[30m])'
 [{"m":{"user":"unknown","status":"401"},"v":"0"}]
 ```
+
+## 5단계 지표 초기화와 부하 테스트
+
+부하 테스트 결과는 [docs/loadtest.md](loadtest.md)에 정리했다.
+
+| 항목 | 기준 | 실측 | 판정 |
+|---|---|---|---|
+| 지표 0 초기화 | 앱 시작 시 알려진 조합 0으로 생성 | init_metrics: chat × 6개 상태 × 5명(+unknown), 토큰 4명 × 2, PII 4종. 재생성 직후 status=429 시계열 5개 0.0 | 통과 |
+| 초기화 호출 위치 | 앱 시작 시 한 번 | app/metrics.py import 시 1회 (main.py·proxy.py는 이번 권한 밖이라 모듈 import 시점 사용) | 통과 |
+| 패널 9~12 decimals | 0 | 4단계에서 이미 fieldConfig.defaults.decimals 0. JSON 변경 없음, 패널 16 유지 | 통과 |
+| ruff / pytest | 0건 / 53 통과 (기존 51 + 새 2) | All checks passed / 53 passed | 통과 |
+| gateway 재생성 | gateway만, 3분 이내 healthy | 30초 healthy. 다른 6개 재시작 없음 | 통과 |
+| locust 추가 | uv add --dev, pyproject.toml·uv.lock만 | locust 2.47.0, 패키지 31개 추가, 기존 버전 변경 없음 | 통과 |
+| loadtest 키 | sk- 1줄, 600 | 1, -rw-------, whoami loadtest | 통과 |
+| 부하 1/8/32명 | CSV 3세트 | u1·u8·u32 stats/history/failures/exceptions CSV 12개, 실패 0건 | 통과 |
+| 온도 | 회차 후 85℃ 이하 | 65 / 72 / 75℃ | 통과 |
+| 부하 중 상태 | vllm·gateway unhealthy 없음 | 없음(15초 간격 확인) | 통과 |
+| 429 패널 쿼리 | researcher_b 1.5 이상 | 2.092 (응답 200×5, 429×2) | 통과 |
+| 키 유출 | 0 | 0 (loadtest·docs 검색, gitleaks) | 통과 |
+| 대시보드 캡처 | evidence/day3/dashboard.png | 있음(키·비밀번호 없음 확인). 브라우저 북마크 바가 보임 | 통과 |
+
+회차 시각(UTC)
+- u1: 2026-11-25T06:13:44Z ~ 06:16:45Z, u8: 06:17:45Z ~ 06:20:45Z, u32: 06:21:45Z ~ 06:24:46Z
+
+### 원본 출력
+
+```text
+$ uv run ruff check .
+All checks passed!
+(exit=0)
+$ uv run pytest -q
+53 passed, 1 warning in 0.37s
+(exit=0)
+$ jq '.panels | map(select(.type != "row")) | length'
+16
+
+$ docker compose up -d --no-deps gateway
+ Container llm-gateway Recreate 
+ Container llm-gateway Recreated 
+ Container llm-gateway Starting 
+ Container llm-gateway Started 
+[15:12:28] Up Less than a second (health: starting)
+[15:12:58] Up 30 seconds (healthy)
+$ curl -s .../metrics | grep status="429" (초기화 확인)
+gateway_requests_total{route="/v1/chat/completions",status="429",user="admin"} 0.0
+gateway_requests_total{route="/v1/chat/completions",status="429",user="researcher_a"} 0.0
+gateway_requests_total{route="/v1/chat/completions",status="429",user="researcher_b"} 0.0
+gateway_requests_total{route="/v1/chat/completions",status="429",user="loadtest"} 0.0
+gateway_requests_total{route="/v1/chat/completions",status="429",user="unknown"} 0.0
+
+$ git diff --stat (pyproject.toml, uv.lock)
+ pyproject.toml |    1 +
+ uv.lock        | 1033 ++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+ 2 files changed, 1034 insertions(+)
++    "locust>=2.47.0",
+
+$ loadtest 키 발급 (마스터 키·키 값 출력 안 함)
+curl_jq_exit=0/0
+$ grep -c '^sk-' ~/llm-keys/loadtest.key
+1
+합계 16
+-rw------- admin.key
+-rw------- loadtest.key
+-rw------- researcher_a.key
+-rw------- researcher_b.key
+$ whoami (loadtest 키)
+{"user_id":"loadtest","key_alias":"loadtest"}
+
+u=1 start=2026-11-25T06:13:44Z end=2026-11-25T06:16:45Z end_epoch=1795587405 dur=181s locust_exit=0 gpu_after=65, 432.75 W unhealthy=없음
+휴식 60초
+u=8 start=2026-11-25T06:17:45Z end=2026-11-25T06:20:45Z end_epoch=1795587645 dur=180s locust_exit=0 gpu_after=72, 439.81 W unhealthy=없음
+휴식 60초
+u=32 start=2026-11-25T06:21:45Z end=2026-11-25T06:24:46Z end_epoch=1795587886 dur=181s locust_exit=0 gpu_after=75, 481.70 W unhealthy=없음
+완료 2026-11-25T06:24:46Z
+
+=== u=1 time=1795587405 (2026-11-25T06:16:45Z)
+max_over_time(vllm:kv_cache_usage_perc[3m]) * 100 => 0.21682567215958182
+max_over_time(vllm:num_requests_running[3m]) => 1
+max_over_time(vllm:num_requests_waiting[3m]) => 0
+rate(vllm:generation_tokens_total[3m]) => 53.090909090909086
+histogram_quantile(0.95, sum by (le) (rate(vllm:time_to_first_token_seconds_bucket[3m]))) => 0.0195
+avg_over_time(nvidia_smi_utilization_gpu_ratio[3m]) * 100 => 33.33333333333333
+max_over_time(nvidia_smi_power_draw_watts[3m]) => 469.99
+=== u=8 time=1795587645 (2026-11-25T06:20:45Z)
+max_over_time(vllm:kv_cache_usage_perc[3m]) * 100 => 0.823937554206422
+max_over_time(vllm:num_requests_running[3m]) => 7
+max_over_time(vllm:num_requests_waiting[3m]) => 0
+rate(vllm:generation_tokens_total[3m]) => 417.2363636363636
+histogram_quantile(0.95, sum by (le) (rate(vllm:time_to_first_token_seconds_bucket[3m]))) => 0.038998201438848926
+avg_over_time(nvidia_smi_utilization_gpu_ratio[3m]) * 100 => 100
+max_over_time(nvidia_smi_power_draw_watts[3m]) => 448.23
+=== u=32 time=1795587886 (2026-11-25T06:24:46Z)
+max_over_time(vllm:kv_cache_usage_perc[3m]) * 100 => 3.013876843018215
+max_over_time(vllm:num_requests_running[3m]) => 23
+max_over_time(vllm:num_requests_waiting[3m]) => 0
+rate(vllm:generation_tokens_total[3m]) => 1619.7454545454543
+histogram_quantile(0.95, sum by (le) (rate(vllm:time_to_first_token_seconds_bucket[3m]))) => 0.039
+avg_over_time(nvidia_smi_utilization_gpu_ratio[3m]) * 100 => 99.41666666666666
+max_over_time(nvidia_smi_power_draw_watts[3m]) => 484.12
+
+$ sleep 61; researcher_b 7회 (max_tokens 8)
+응답 코드: 200 200 200 200 200 429 429
+$ sleep 30
+$ sum by (user) (increase(gateway_requests_total{status="429"}[5m]))
+[{"user":"researcher_b","v":2.092},{"user":"admin","v":0},{"user":"researcher_a","v":0},{"user":"loadtest","v":0},{"user":"unknown","v":0}]
+```

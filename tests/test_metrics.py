@@ -14,6 +14,7 @@ from prometheus_client import REGISTRY
 
 from app.identity import IdentityCache, get_identity_cache
 from app.main import app
+from app.metrics import init_metrics
 from app.proxy import get_http_client
 
 TEST_KEY = "sk-metrics-test-key-0001"
@@ -128,3 +129,25 @@ def test_metrics_and_healthz_are_not_counted_or_audited(client: TestClient) -> N
     assert all_requests_total() == before
     lines_after = len(audit_path.read_text().splitlines()) if audit_path.exists() else 0
     assert lines_after == lines_before
+
+
+def test_known_label_combinations_exist_at_startup() -> None:
+    # app.main import(앱 시작) 때 init_metrics가 불려 0인 시계열이 이미 있다.
+    sample = REGISTRY.get_sample_value(
+        "gateway_requests_total",
+        {"route": CHAT_PATH, "status": "429", "user": "researcher_b"},
+    )
+    assert sample is not None and sample >= 0
+    assert REGISTRY.get_sample_value("gateway_pii_masked_total", {"kind": "mrn"}) is not None
+    tokens = REGISTRY.get_sample_value(
+        "gateway_tokens_total", {"user": "loadtest", "kind": "prompt"}
+    )
+    assert tokens is not None
+
+
+def test_init_metrics_is_idempotent() -> None:
+    labels = {"route": CHAT_PATH, "status": "200", "user": "admin"}
+    before = REGISTRY.get_sample_value("gateway_requests_total", labels)
+    init_metrics(["admin", "researcher_a", "researcher_b", "loadtest"])
+    init_metrics(["admin", "researcher_a", "researcher_b", "loadtest"])
+    assert REGISTRY.get_sample_value("gateway_requests_total", labels) == before
