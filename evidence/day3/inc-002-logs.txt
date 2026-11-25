@@ -1,0 +1,9 @@
+# INC-002 핵심 로그 (UTC). T1=09:59:31 docker compose start vllm (gpu-hog 10738 MiB 점유 중)
+09:59:39 vllm: non-default args: {... 'max_model_len': 8192, 'gpu_memory_utilization': 0.85, ...}
+09:59:49 vllm: (EngineCore) ERROR [core.py:1584] EngineCore failed to start.
+09:59:49 vllm: ValueError: Free memory on device cuda:0 (18.21/31.31 GiB) on startup is less than desired GPU memory utilization (0.85, 26.62 GiB). Decrease GPU memory utilization or reduce GPU memory used by other processes.
+09:59:49 vllm: RuntimeError: Engine core initialization failed. See root cause above. Failed core proc(s): {}
+09:59:53 docker events: vllm die exitCode=1 -> start (restart: unless-stopped, 자동 재시도)
+10:00:11 vllm: ValueError: Free memory on device cuda:0 (18.26/31.31 GiB) on startup is less than desired GPU memory utilization (0.85, 26.62 GiB). ...
+10:00:14 docker events: vllm die exitCode=1 -> start (같은 오류로 약 21초마다 반복)
+# 기동 중 게이트웨이 chat: 500 (09:59:31, 09:59:41, 09:59:51 측정)

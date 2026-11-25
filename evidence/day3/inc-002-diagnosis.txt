@@ -1,0 +1,23 @@
+# INC-002 진단 (UTC 10:00:27 수집, gpu-hog 점유 중)
+
+## nvidia-smi --query-compute-apps=pid,process_name,used_memory
+pid, process_name, used_gpu_memory [MiB]
+285068, python3, 10738 MiB
+(위 python3 = gpu-hog 컨테이너 안의 torch.empty 10GiB 점유 프로세스. vLLM은 기동 실패로 상주 프로세스 없음)
+
+## nvidia-smi --query-gpu=memory.used,memory.total,memory.free
+12747 MiB, 32607 MiB, 19318 MiB
+
+## docker ps --filter name=gpu-hog
+6076ed558029 gpu-hog vllm/vllm-openai:v0.33.0 Up About a minute
+
+## vllm 상태
+running RestartCount=2 ExitCode=0  (restart: unless-stopped 때문에 약 21초마다 재시작-실패 반복)
+
+## 계산식
+- 전체 메모리: 32607 MiB (vLLM 표기 31.31 GiB)
+- vLLM 요구량 = 전체 x 0.85 = 32607 x 0.85 = 27715 MiB (vLLM 표기 26.62 GiB)
+- 현재 여유 = 19318 MiB (vLLM 기동 시점 표기 18.21 GiB)
+- 부족분 = 27715 - 19318 = 8397 MiB  -> 여유 < 요구량 이므로 기동 실패
+- 기준(장애 전): vLLM 미기동 시 다른 프로세스 사용 2028 MiB -> 여유 약 30579 MiB 로 요구량 충족
+- 기동 가능 조건: 다른 프로세스 GPU 사용 <= 전체 x 0.15 = 4891 MiB
