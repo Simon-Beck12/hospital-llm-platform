@@ -1,0 +1,20 @@
+# INC-002 GPU 메모리 부족 타임라인 (UTC)
+# 열: 응답 시각 | T1 기준 경과(초) | 상태 재시작횟수 종료코드 health | gateway chat HTTP | up{job=vllm}
+# 09:58:46 docker compose stop vllm (GPU 29455 -> 2028 MiB)
+# 09:58:51 gpu-hog 시작, 09:59:22 점유 확인 10738 MiB
+09:59:31 | 0 | running 0 0 starting | 500 | -
+09:59:41 | 10 | running 0 0 starting | 500 | -
+09:59:51 | 20 | running 0 0 starting | 500 | -
+# 주: 위 3줄(기동 관찰)의 시각은 요청을 보낸 시각. 감사 로그 기준 응답은 09:59:36, 09:59:46, 09:59:55 (500, 각 약 4.5초)
+# 09:59:53, 10:00:14 ... vllm die exitCode=1 -> 자동 재시작(같은 오류 반복)
+# 10:00:49 docker rm -f gpu-hog (복구 시작)
+# 10:00:51 gpu-hog 삭제 후 vllm 상태: running 3
+10:00:56 | 80 | running 3 0 starting | 500 | 0
+10:01:06 | 90 | running 3 0 starting | 500 | 0
+10:01:12 | 100 | running 3 0 starting | 200 | 0
+# 첫 200 관측. gpu-hog 삭제부터 23초
+# 주: docker events(vllm) 10:00:14 die 1 -> 10:00:15 start, 10:00:36 die 1 -> 10:00:36 start(재시작 3회째), 10:01:12 health_status: healthy
+# 주: 3회째 재시작(10:00:36)의 메모리 점검(기동 후 약 18초) 직전에 gpu-hog가 삭제돼 통과. docker compose start 없이 재시작 정책으로 자동 복구.
+# 주: vllm 10:01:04 Available KV cache memory: 10.1 GiB, 10:01:10 init engine took 12.38 s
+# 주: Prometheus up{job="vllm"} 전환(query_range step 5s): 09:58:55 0(계획된 stop), 10:01:25 1. scrape_interval 15s.
+# 최종 확인: 컨테이너 7개 running/healthy, GPU 29303 MiB(기준 29455 MiB, 차이 -152 MiB), gpu-hog 없음

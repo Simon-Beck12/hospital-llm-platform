@@ -1,0 +1,11 @@
+# INC-001 핵심 로그 (UTC). 출처: docker events(vllm), docker compose logs vllm/litellm, 게이트웨이 감사 로그
+09:55:49 docker events: vllm kill signal=9 -> die exitCode=137 (SIGKILL이라 vLLM 로그에는 종료 줄이 없음)
+09:56:43 litellm: socket.gaierror: [Errno -3] Temporary failure in name resolution (LiteLLM Retried: 2 times) -> 게이트웨이 500 internal_server_error
+09:56:49 gateway audit: 09:55:49 요청이 60004 ms 뒤 504 upstream_timeout
+09:57:13 docker events: vllm start (docker compose start vllm, 수동 복구)
+09:57:35 vllm: Model loading took 15.27 GiB memory and 3.796475 seconds
+09:57:36 vllm: [backbone] Directly load AOT compilation ... torch.compile took 0.14 s in total
+09:57:41 vllm: GPU KV cache size: 73,808 tokens, Maximum concurrency for 8,192 tokens per request: 9.01x
+09:57:47 vllm: init engine (profile, create kv cache, warmup model) took 12.25 s
+09:57:49 docker events: health_status: healthy
+09:57:53 vllm: "POST /v1/chat/completions HTTP/1.1" 200 OK (게이트웨이 첫 200, latency 113 ms)

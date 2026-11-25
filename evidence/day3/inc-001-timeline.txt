@@ -1,0 +1,19 @@
+# INC-001 vLLM 비정상 종료 타임라인 (UTC). T0=2026-11-25T09:55:49Z docker kill vllm
+# 열: 시각 | 경과(초) | 컨테이너 상태 재시작횟수 | gateway chat HTTP | up{job=vllm}
+# 2026-11-25T09:55:49Z docker kill vllm 실행
+09:56:04 | 0 | exited 0 | 000 | 0
+09:56:19 | 15 | exited 0 | 000 | 0
+09:56:34 | 30 | exited 0 | 000 | 0
+09:56:47 | 45 | exited 0 | 500 | 0
+09:57:00 | 58 | exited 0 | 500 | 0
+09:57:13 | 71 | exited 0 | 500 | 0
+# 09:57:13 60초 안에 자동 재시작 없음 -> docker compose start vllm (수동 복구)
+09:57:18 | 84 | running 0 | 500 | 0
+09:57:27 | 94 | running 0 | 500 | 0
+09:57:38 | 104 | running 0 | 500 | 0
+09:57:48 | 114 | running 0 | 500 | 0
+09:57:53 | 124 | running 0 | 200 | 1
+# 첫 200 관측, 종료
+# 주: 시각 열은 chat 응답을 받은 시각, 경과 열은 그 측정 회차를 시작한 시각(T0 기준 초). chat은 curl --max-time 15초.
+# 000 = 15초 안에 응답 없음(클라이언트 타임아웃). 500 = LiteLLM이 vllm 이름 해석 실패(gaierror)를 500으로 반환.
+# Prometheus up{job="vllm"} 전환(query_range step 5s): 09:55:55 0, 09:57:55 1. scrape_interval 15s.

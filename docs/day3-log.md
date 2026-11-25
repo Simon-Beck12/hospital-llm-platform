@@ -604,3 +604,29 @@ $ sleep 30
 $ sum by (user) (increase(gateway_requests_total{status="429"}[5m]))
 [{"user":"researcher_b","v":2.092},{"user":"admin","v":0},{"user":"researcher_a","v":0},{"user":"loadtest","v":0},{"user":"unknown","v":0}]
 ```
+
+## 6단계 장애 재현
+
+- 캡처 교체: 북마크 바가 찍힌 `evidence/day3/dashboard.png`를 새 캡처 2장(`dashboard.png`, `dashboard-load.png`)으로 바꾸고 7b02386을 amend했다(새 해시 9972e4c). `git rev-list --objects origin/main..HEAD`에서 옛 blob(574a1292…)은 나오지 않는다.
+- 장애 2건을 실제로 일으켜 보고서로 남겼다. 기준값: vllm, gateway healthy, GPU 29,455 / 32,607 MiB, researcher_a chat 200.
+
+| 항목 | 기준 | 실측 | 판정 |
+|---|---|---|---|
+| 옛 캡처 이력 제거 | "옛 이미지 없음" | 옛 이미지 없음 | 통과 |
+| INC-001 복구 | 8분 안에 200 | 124초(수동 `docker compose start vllm`) | 통과 |
+| INC-001 탐지 | `up{job="vllm"}` = 0 | kill 후 6초 | 통과 |
+| INC-002 재현 | 메모리 부족 오류로 기동 실패 | `ValueError: Free memory ... (18.21/31.31 GiB) ... (0.85, 26.62 GiB)` | 통과 |
+| INC-002 복구 | gpu-hog 삭제 후 6분 안에 200 | 23초(재시작 정책으로 자동 재기동) | 통과 |
+| 최종 컨테이너 | 7개 running/healthy | 7개 | 통과 |
+| GPU 메모리 | 기준 ±1 GB | 29,303 MiB(-152 MiB) | 통과 |
+| gpu-hog | 없음 | 없음 | 통과 |
+| 키 유출 | 0건 | 0건 | 통과 |
+
+- 보고서: [장애 목록](incidents/README.md), [INC-001 vLLM 비정상 종료](incidents/INC-001-vllm-crash.md), [INC-002 GPU 메모리 부족](incidents/INC-002-gpu-memory.md)
+- 예상과 다른 점: 사용자 오류 코드가 502가 아니라 500(LiteLLM이 연결 실패를 500으로 돌려줌)이었다. kill 시점에 보낸 요청은 60초 대기 후 504였다. `docker kill`은 `unless-stopped` 재시작 대상이 아니었다.
+
+### 3일차 요약
+
+1. 게이트웨이 지표(/metrics), Prometheus(15일 보존), GPU 수집기, Grafana 대시보드(패널 16개)로 서비스 상태를 볼 수 있게 했다.
+2. 부하 1/8/32명에서 실패 0%, RPS 0.43 → 12.96, p95 1.3 → 1.5초. GPU 사용률은 8명부터 99~100%, KV 캐시는 최대 3%였다.
+3. 장애 2건(vLLM 비정상 종료 124초, GPU 메모리 부족 101초)을 재현해 탐지·원인·복구를 기록했다. 알림 규칙이 없다는 것이 가장 큰 빈틈이다.
