@@ -219,3 +219,151 @@ $ 키 3개 grep -cF (/metrics)
 0
 0
 ```
+
+## 3단계 Prometheus와 GPU 지표
+
+구성 표
+
+| 서비스 | 이미지 | 호스트 포트 | 수집 대상 |
+|---|---|---|---|
+| prometheus | prom/prometheus:v3.15.1 | 127.0.0.1:9090 | localhost:9090, vllm:8000, gateway:8080, gpu-exporter:9835 (15초 간격) |
+| gpu-exporter | utkuozdemir/nvidia_gpu_exporter:1.17.0 | 없음(backend 내부망만) | nvidia-smi 값을 :9835/metrics로 내보냄 |
+| (수집됨) vllm | vllm/vllm-openai:v0.33.0 | 없음 | vllm:* 지표 |
+| (수집됨) gateway | llm-gateway:day2 | 127.0.0.1:18080 | gateway_* 지표 |
+
+- 보존: --storage.tsdb.retention.time=15d, --storage.tsdb.retention.size=5GB, promdata 볼륨.
+- LiteLLM 지표는 수집하지 않는다(/metrics 401, 1단계 결정).
+
+| 항목 | 기준 | 실측 | 판정 |
+|---|---|---|---|
+| promtool | check config SUCCESS | SUCCESS | 통과 |
+| compose 문법 | config --quiet OK, 추가만 | OK, 34줄 추가·삭제 0 | 통과 |
+| 컨테이너 6개 | 6개 Up | vllm, litellm-db, litellm, llm-gateway, prometheus, gpu-exporter. 기존 4개 재시작 없음 | 통과 |
+| gpu-exporter nvidia-smi | GPU 0: RTX 5090 | GPU 0: NVIDIA GeForce RTX 5090 | 통과 |
+| 수집 대상 | 4/4 up | prometheus, vllm, gateway, gpu 모두 up, lastError 없음 | 통과 |
+| 사용자별 요청 수 | 쿼리 결과 있음 | admin 2, researcher_a 2, researcher_b 2, unknown 1 | 통과 |
+| KV cache 값 | 쿼리 결과 있음 | 0 (유휴, 요청 끝난 뒤 조회) | 통과 |
+| p95 지연 | 쿼리 결과 있음 | 0.2425 s (5분 rate) | 통과 |
+| GPU 지표 5종 | 사용률·메모리 사용·메모리 전체·온도·전력 | 0.07(7%), 28.71 GiB, 31.84 GiB, 45℃, 87.29 W | 통과 |
+| uv 호환 | 로컬 uv와 Dockerfile uv 같음, revision 5로 빌드 성공 | 로컬 uv 0.13.6 = Dockerfile uv:0.13.6, uv.lock revision 5, 이미지 2026-11-25 14:09 빌드 성공 | 통과 |
+| 호스트 포트 | 9090만 127.0.0.1, 9835 비노출 | 127.0.0.1:9090만 LISTEN | 통과 |
+
+4단계 대시보드용 PromQL
+
+| 패널 | PromQL |
+|---|---|
+| 수집 상태 | `up` |
+| 동시 처리 요청(vLLM) | `vllm:num_requests_running` |
+| 대기 요청(vLLM) | `vllm:num_requests_waiting` |
+| KV 캐시 사용률 | `vllm:kv_cache_usage_perc * 100` |
+| 사용자별 요청 수 | `sum by (user) (gateway_requests_total)` |
+| 사용자별 요청/초 | `sum by (user) (rate(gateway_requests_total[5m]))` |
+| 상태 코드별 요청/초 | `sum by (status) (rate(gateway_requests_total[5m]))` |
+| 사용자별 토큰 | `sum by (user, kind) (gateway_tokens_total)` |
+| 게이트웨이 p95 지연 | `histogram_quantile(0.95, sum by (le) (rate(gateway_request_duration_seconds_bucket[5m])))` |
+| vLLM TTFT p95 | `histogram_quantile(0.95, sum by (le) (rate(vllm:time_to_first_token_seconds_bucket[5m])))` |
+| PII 종류별 건수 | `sum by (kind) (gateway_pii_masked_total)` |
+| GPU 사용률 | `nvidia_smi_utilization_gpu_ratio * 100` |
+| GPU 메모리 | `nvidia_smi_memory_used_bytes / 1024^3`, `nvidia_smi_memory_total_bytes / 1024^3` |
+| GPU 온도 | `nvidia_smi_temperature_gpu` |
+| GPU 전력 | `nvidia_smi_power_draw_watts` |
+
+메모
+- GPU 지표 실제 이름: nvidia_smi_utilization_gpu_ratio(0~1), nvidia_smi_memory_used_bytes, nvidia_smi_memory_total_bytes, nvidia_smi_temperature_gpu, nvidia_smi_power_draw_watts(average·instant 변형도 있음).
+- 사용자별 요청 수 2는 2단계 확인 요청 1건과 이번 요청 1건의 합이다(gateway 재생성 이후 누적).
+
+### 원본 출력
+
+```text
+$ uv --version
+uv 0.13.6 (x86_64-unknown-linux-gnu)
+$ grep -m1 'ghcr.io/astral-sh/uv' Dockerfile
+COPY --from=ghcr.io/astral-sh/uv:0.13.6 /uv /bin/uv
+$ head -3 uv.lock
+version = 1
+revision = 5
+requires-python = ">=3.12"
+$ docker image inspect llm-gateway:day2 --format '{{.Created}}'
+2026-11-25T14:09:18.735782768+09:00
+
+$ docker run --rm -v "$PWD/monitoring:/cfg:ro" --entrypoint promtool prom/prometheus:v3.15.1 check config /cfg/prometheus.yml
+Checking /cfg/prometheus.yml
+ SUCCESS: /cfg/prometheus.yml is valid prometheus config file syntax
+
+(exit=0)
+$ docker compose config --quiet && echo "compose 문법 OK"
+compose 문법 OK
+$ git diff --numstat compose.yaml
+34	0	compose.yaml
+삭제 줄: 0
+
+$ docker compose up -d --no-deps prometheus gpu-exporter
+ Image utkuozdemir/nvidia_gpu_exporter:1.17.0 Pulled 
+ Volume llm-platform_promdata Creating 
+ Volume llm-platform_promdata Creating 
+ Container gpu-exporter Creating 
+ Volume llm-platform_promdata Created 
+ Volume llm-platform_promdata Created 
+ Container prometheus Creating 
+ Container prometheus Created 
+ Container gpu-exporter Created 
+ Container prometheus Starting 
+ Container gpu-exporter Starting 
+ Container prometheus Started 
+ Container gpu-exporter Started 
+(exit=0)
+$ docker compose ps --format '{{.Name}}\t{{.Status}}'
+gpu-exporter	Up 5 seconds
+litellm	Up About an hour
+litellm-db	Up About an hour (healthy)
+llm-gateway	Up 20 minutes (healthy)
+prometheus	Up 5 seconds
+vllm	Up About an hour (healthy)
+$ docker compose exec gpu-exporter nvidia-smi -L
+GPU 0: NVIDIA GeForce RTX 5090 (UUID: GPU-138dd643-d4bb-f97d-9b26-d9c05720b67a)
+(exit=0)
+
+$ curl -s http://127.0.0.1:9090/api/v1/targets | jq -r '.data.activeTargets[] | "\(.labels.job)\t\(.health)\t\(.lastError)"'
+gateway	up	
+gpu	up	
+prometheus	up	
+vllm	up	
+
+$ Q 'up'
+[{"m":{"__name__":"up","instance":"gpu-exporter:9835","job":"gpu"},"v":"1"},{"m":{"__name__":"up","instance":"vllm:8000","job":"vllm"},"v":"1"},{"m":{"__name__":"up","instance":"gateway:8080","job":"gateway"},"v":"1"},{"m":{"__name__":"up","instance":"localhost:9090","job":"prometheus"},"v":"1"}]
+$ Q 'vllm:num_requests_running'
+[{"m":{"__name__":"vllm:num_requests_running","engine":"0","instance":"vllm:8000","job":"vllm","model_name":"qwen3-8b"},"v":"0"}]
+$ Q 'vllm:kv_cache_usage_perc'
+[{"m":{"__name__":"vllm:kv_cache_usage_perc","engine":"0","instance":"vllm:8000","job":"vllm","model_name":"qwen3-8b"},"v":"0"}]
+$ Q 'sum by (user) (gateway_requests_total)'
+[{"m":{"user":"admin"},"v":"2"},{"m":{"user":"researcher_a"},"v":"2"},{"m":{"user":"researcher_b"},"v":"2"},{"m":{"user":"unknown"},"v":"1"}]
+$ Q 'sum by (user, kind) (gateway_tokens_total)'
+[{"m":{"kind":"prompt","user":"admin"},"v":"32"},{"m":{"kind":"completion","user":"admin"},"v":"32"},{"m":{"kind":"prompt","user":"researcher_a"},"v":"32"},{"m":{"kind":"completion","user":"researcher_a"},"v":"32"},{"m":{"kind":"prompt","user":"researcher_b"},"v":"32"},{"m":{"kind":"completion","user":"researcher_b"},"v":"32"}]
+$ Q 'histogram_quantile(0.95, sum by (le) (rate(gateway_request_duration_seconds_bucket[5m])))'
+[{"m":{},"v":"0.2425"}]
+$ GPU 지표 이름
+nvidia_smi_memory_total_bytes
+nvidia_smi_memory_used_bytes
+nvidia_smi_power_draw_average_watts
+nvidia_smi_power_draw_instant_watts
+nvidia_smi_power_draw_watts
+nvidia_smi_temperature_gpu
+nvidia_smi_temperature_gpu_tlimit
+nvidia_smi_utilization_gpu_ratio
+$ Q 'nvidia_smi_memory_total_bytes'
+[{"m":{"__name__":"nvidia_smi_memory_total_bytes","instance":"gpu-exporter:9835","job":"gpu","uuid":"138dd643-d4bb-f97d-9b26-d9c05720b67a"},"v":"34190917632"}]
+$ Q 'nvidia_smi_memory_used_bytes'
+[{"m":{"__name__":"nvidia_smi_memory_used_bytes","instance":"gpu-exporter:9835","job":"gpu","uuid":"138dd643-d4bb-f97d-9b26-d9c05720b67a"},"v":"30832328704"}]
+$ Q 'nvidia_smi_power_draw_average_watts'
+[{"m":{"__name__":"nvidia_smi_power_draw_average_watts","instance":"gpu-exporter:9835","job":"gpu","uuid":"138dd643-d4bb-f97d-9b26-d9c05720b67a"},"v":"87.29"}]
+$ Q 'nvidia_smi_power_draw_instant_watts'
+[{"m":{"__name__":"nvidia_smi_power_draw_instant_watts","instance":"gpu-exporter:9835","job":"gpu","uuid":"138dd643-d4bb-f97d-9b26-d9c05720b67a"},"v":"90.01"}]
+$ Q 'nvidia_smi_power_draw_watts'
+[{"m":{"__name__":"nvidia_smi_power_draw_watts","instance":"gpu-exporter:9835","job":"gpu","uuid":"138dd643-d4bb-f97d-9b26-d9c05720b67a"},"v":"87.29"}]
+$ Q 'nvidia_smi_temperature_gpu'
+[{"m":{"__name__":"nvidia_smi_temperature_gpu","instance":"gpu-exporter:9835","job":"gpu","uuid":"138dd643-d4bb-f97d-9b26-d9c05720b67a"},"v":"45"}]
+$ Q 'nvidia_smi_temperature_gpu_tlimit'
+[{"m":{"__name__":"nvidia_smi_temperature_gpu_tlimit","instance":"gpu-exporter:9835","job":"gpu","uuid":"138dd643-d4bb-f97d-9b26-d9c05720b67a"},"v":"45"}]
+$ Q 'nvidia_smi_utilization_gpu_ratio'
+[{"m":{"__name__":"nvidia_smi_utilization_gpu_ratio","instance":"gpu-exporter:9835","job":"gpu","uuid":"138dd643-d4bb-f97d-9b26-d9c05720b67a"},"v":"0.07"}]
+```

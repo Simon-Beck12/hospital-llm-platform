@@ -102,9 +102,43 @@ services:
     networks: [backend]
     logging: *default-logging
 
+  prometheus:
+    image: prom/prometheus:v3.15.1
+    container_name: prometheus
+    restart: unless-stopped
+    command:
+      - --config.file=/etc/prometheus/prometheus.yml
+      - --storage.tsdb.path=/prometheus
+      - --storage.tsdb.retention.time=15d
+      - --storage.tsdb.retention.size=5GB
+    volumes:
+      - ./monitoring/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - promdata:/prometheus
+    ports:
+      - "127.0.0.1:9090:9090"
+    networks: [backend]
+    logging: *default-logging
+
+  gpu-exporter:
+    image: utkuozdemir/nvidia_gpu_exporter:1.17.0
+    container_name: gpu-exporter
+    restart: unless-stopped
+    environment:
+      NVIDIA_DRIVER_CAPABILITIES: utility
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu, utility]
+    networks: [backend]
+    logging: *default-logging
+
 networks:
   backend:
 
 volumes:
   pgdata:
   auditlogs:
+  promdata:
