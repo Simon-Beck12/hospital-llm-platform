@@ -138,3 +138,84 @@ $ nvidia-smi --query-gpu=utilization.gpu,memory.used,temperature.gpu,power.draw,
 $ ss -tlnH | awk '{print $4}' | grep -E ':(9090|3000|9400|9835)$' || echo '9090/3000/9400/9835 비어 있음'
 9090/3000/9400/9835 비어 있음
 ```
+
+## 2단계 게이트웨이 /metrics
+
+지표 표
+
+| 이름 | 종류 | 라벨 | 뜻 | 4단계 대시보드 패널 |
+|---|---|---|---|---|
+| gateway_requests_total | Counter | route, status, user | /v1 요청 수(경로·상태 코드·사용자별) | 사용자별 요청/초, 상태 코드별 비율(4xx·5xx), 429 발생 수 |
+| gateway_request_duration_seconds | Histogram (0.05~60초 10구간) | route | 게이트웨이 처리 시간 | 경로별 p50/p95 지연 |
+| gateway_tokens_total | Counter | user, kind(prompt·completion) | 사용자별 토큰 수(LiteLLM 응답 usage) | 사용자별 토큰/분, 누적 토큰 |
+| gateway_pii_masked_total | Counter | kind(rrn·phone·mrn·email) | 종류별 PII 마스킹 건수 | PII 종류별 건수 |
+| gateway_inflight_requests | Gauge | 없음 | 처리 중인 /v1 요청 수 | 동시 요청 수 |
+
+- route는 /v1/chat/completions, /v1/models, /v1/whoami만 그대로 쓰고 나머지는 other다. user는 key_alias, 식별 실패면 unknown이다.
+- 라벨에 키, 요청 ID, 프롬프트, IP를 넣지 않는다. 지표 값은 감사 로그 레코드와 같은 값(status, latency_ms, key_alias, usage, pii_counts)으로 갱신한다.
+- /metrics와 /healthz는 감사 로그와 요청 지표에 넣지 않는다. /metrics는 인증 없이 열린다(호스트에는 127.0.0.1:18080만 노출).
+
+| 항목 | 기준 | 실측 | 판정 |
+|---|---|---|---|
+| prometheus-client 추가 | uv add, pyproject.toml·uv.lock만 변경 | 0.26.0. 다른 패키지 버전 변경 없음(uv.lock revision 3→5 형식 변경) | 통과 |
+| ruff | 오류 0건 | All checks passed (첫 실행 2건: import 순서, except-pass → 수정) | 통과 |
+| pytest | 51개 통과 (기존 45 + 새 6) | 51 passed | 통과 |
+| 컨테이너 재생성 | gateway만, 3분 이내 healthy | 30초 healthy. vllm·litellm·litellm-db 재시작 없음. 이미지 285MB | 통과 |
+| 사용자별 요청 수 | admin·researcher_a·researcher_b status=200 각 1 이상 | 각 1 | 통과 |
+| unknown 401 | 1 이상 | route=/v1/models, status=401, user=unknown 1 | 통과 |
+| 토큰 | 사용자별 prompt·completion 증가 | 사용자마다 prompt 19, completion 16 | 통과 |
+| PII phone | 3 이상 | 3 | 통과 |
+| inflight | 0 | 0 | 통과 |
+| 키 유출 | 0 | 0 / 0 / 0 | 통과 |
+| /metrics 감사 로그 기록 | 0 | 0 | 통과 |
+
+정정: 1단계 보고 세부의 "7개 중 4개"는 틀렸다. 기본 이름 5개 + histogram 2개 = 7개다.
+
+### 원본 출력
+
+```text
+$ uv run ruff check .
+All checks passed!
+(exit=0)
+
+$ uv run pytest -q
+51 passed, 1 warning in 0.37s
+(exit=0)
+
+$ docker compose up -d --no-deps gateway
+ Container llm-gateway Recreate 
+ Container llm-gateway Recreated 
+ Container llm-gateway Starting 
+ Container llm-gateway Started 
+[14:09:23] Up Less than a second (health: starting)
+[14:09:53] Up 30 seconds (healthy)
+$ docker image ls llm-gateway:day2 --format '{{.Size}}'
+285MB
+
+admin chat -> 200
+researcher_a chat -> 200
+researcher_b chat -> 200
+키 없음 -> 401
+$ curl -s .../metrics | grep -E '^gateway_(requests_total|tokens_total|pii_masked_total|inflight_requests)' | sort
+gateway_inflight_requests 0.0
+gateway_pii_masked_total{kind="phone"} 3.0
+gateway_requests_total{route="/v1/chat/completions",status="200",user="admin"} 1.0
+gateway_requests_total{route="/v1/chat/completions",status="200",user="researcher_a"} 1.0
+gateway_requests_total{route="/v1/chat/completions",status="200",user="researcher_b"} 1.0
+gateway_requests_total{route="/v1/models",status="401",user="unknown"} 1.0
+gateway_tokens_total{kind="completion",user="admin"} 16.0
+gateway_tokens_total{kind="completion",user="researcher_a"} 16.0
+gateway_tokens_total{kind="completion",user="researcher_b"} 16.0
+gateway_tokens_total{kind="prompt",user="admin"} 19.0
+gateway_tokens_total{kind="prompt",user="researcher_a"} 19.0
+gateway_tokens_total{kind="prompt",user="researcher_b"} 19.0
+$ curl -s .../metrics | grep -E '^gateway_request_duration_seconds_(count|sum)'
+gateway_request_duration_seconds_count{route="/v1/chat/completions"} 3.0
+gateway_request_duration_seconds_sum{route="/v1/chat/completions"} 0.708
+gateway_request_duration_seconds_count{route="/v1/models"} 1.0
+gateway_request_duration_seconds_sum{route="/v1/models"} 0.0
+$ 키 3개 grep -cF (/metrics)
+0
+0
+0
+```

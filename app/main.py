@@ -1,4 +1,5 @@
 import re
+import sys
 import time
 import uuid
 from collections.abc import Awaitable, Callable
@@ -7,11 +8,13 @@ from typing import Annotated, Any
 import httpx
 from fastapi import Depends, FastAPI, Request, Response
 from fastapi.responses import JSONResponse
+from prometheus_client import CONTENT_TYPE_LATEST, generate_latest
 
 from app.audit import prompt_sha256, utc_ts, write_audit
 from app.config import get_settings
 from app.identity import Identity, IdentityCache, get_identity_cache, resolve_identity
 from app.masking import mask_messages
+from app.metrics import INFLIGHT, observe_record
 from app.proxy import error_body, forward, get_http_client, lifespan
 
 app = FastAPI(title="LLM Serving Gateway", lifespan=lifespan)
@@ -78,20 +81,34 @@ async def request_id_middleware(
     st.prompt_sha256 = None
     st.error_type = None
     audited = request.url.path.startswith("/v1/")
+    if audited:
+        INFLIGHT.inc()
     try:
         response = await call_next(request)
     except Exception:
         if audited:
             st.error_type = st.error_type or "internal_error"
-            write_audit(_audit_record(request, 500, started))
+            _finish(_audit_record(request, 500, started))
         raise
+    finally:
+        if audited:
+            INFLIGHT.dec()
     response.headers["X-Request-ID"] = request_id
     if request.url.path == CHAT_PATH:
         # 건수만 남긴다. 401·400·429 등 오류 응답에도 넣는다(가리기 전이면 0).
         response.headers["X-PII-Masked"] = str(sum(st.pii_counts.values()))
     if audited:
-        write_audit(_audit_record(request, response.status_code, started))
+        _finish(_audit_record(request, response.status_code, started))
     return response
+
+
+def _finish(record: dict[str, Any]) -> None:
+    """감사 로그와 지표를 같은 레코드로 남긴다. 지표 실패도 요청을 깨지 않는다."""
+    write_audit(record)
+    try:
+        observe_record(record)
+    except Exception as exc:  # noqa: BLE001
+        print(f"metrics update failed: {type(exc).__name__}", file=sys.stderr)
 
 
 def _record_upstream(request: Request, status: int, body: Any) -> None:
@@ -145,6 +162,11 @@ def strip_leading_whitespace(body: Any) -> None:
 @app.get("/healthz")
 def healthz() -> dict[str, str]:
     return {"status": "ok"}
+
+
+@app.get("/metrics")
+def metrics() -> Response:
+    return Response(content=generate_latest(), media_type=CONTENT_TYPE_LATEST)
 
 
 @app.get("/v1/whoami")
