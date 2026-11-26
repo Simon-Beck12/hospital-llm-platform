@@ -111,3 +111,14 @@ firing  2026-11-26T02:55:02Z ~ 2026-11-26T02:56:16Z
 | 서버 IP·홈 경로 | 0건 | 0건 | 통과 |
 
 - 결과: 최종 점검 16개 항목 중 16개 통과. loadtest 키 401 확인과 태그는 5b단계에서 한다.
+
+## 5b단계
+
+- loadtest 키(1일 만료)가 만료 뒤 실제로 거절되는지 확인했다. 조회 시각은 2026-11-26 06:19:01Z(15:19 KST)로, 만료 06:13:18Z에서 343초 뒤다(식별 캐시 300초보다 김). 키 값과 마스터 키는 쓰지 않았다.
+- 기록: [loadtest-expiry.txt](../evidence/day4/loadtest-expiry.txt). 2단계 판정 표의 "보류"는 이 단계로 끝났다.
+
+| 항목 | 기준 | 실측 | 판정 |
+|---|---|---|---|
+| loadtest → gateway chat | 200이 아님(401/400, expired) | 401, expired_key | 통과 |
+| loadtest → LiteLLM /key/info | 200이 아님(401/400, expired) | 401, expired_key | 통과 |
+| 대조군 researcher_a → gateway chat | 200 | 200 | 통과 |

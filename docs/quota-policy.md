@@ -48,7 +48,7 @@
 | admin | 1,000 | 1,000,000 | 2026-12-24 04:07 | 일치 |
 | researcher_a | 20 | 20,000 | 2026-12-24 04:07 | 일치 |
 | researcher_b | 5 | 2,000 | 2026-12-24 04:07 | 일치 |
-| loadtest | 6,000 | 5,000,000 | 2026-11-26 06:13:18 | 한도 일치. 03:06Z에는 아직 만료 전이라 chat 200 |
+| loadtest | 6,000 | 5,000,000 | 2026-11-26 06:13:18 | 만료 후 거절 확인(HTTP 401), [evidence/day4/loadtest-expiry.txt](../evidence/day4/loadtest-expiry.txt) |
 
 - 네 키 모두 `max_parallel_requests`는 null(동시 요청 수 제한 없음)이고, `models`는 `["qwen3-8b"]`다.
 - loadtest 키는 2026-11-26 06:13:18Z에 만료될 예정이다. 만료 뒤 401이 나오는지는 4일차 5단계 최종 점검에서 확인한다.

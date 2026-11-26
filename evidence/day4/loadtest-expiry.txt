@@ -1,0 +1,15 @@
+# loadtest 키 만료 후 거절 확인 (4일차 5b단계). 키 값, 키 해시, 키 끝자리는 넣지 않는다. 마스터 키는 쓰지 않았다.
+조회 시각: 2026-11-26T06:19:01Z (KST 2026-11-26 15:19:01)
+만료 시각: 2026-11-26T06:13:18Z (/key/info 기록 06:13:18.848Z, evidence/day4/key-limits.txt)
+만료 후 경과: 343초(5.7분). 식별 캐시 TTL 300초보다 길다.
+
+a. loadtest 키 → gateway POST http://127.0.0.1:18080/v1/chat/completions (max_tokens 8)
+   HTTP 401, type=expired_key
+   메시지 앞 120자: Authentication Error - Expired Key. Key Expiry time 2026-11-26 06:13:18.848000+00:00 and current time 2026-11-26 06:19:0
+b. loadtest 키 → LiteLLM GET http://127.0.0.1:4000/key/info (같은 키)
+   HTTP 401, type=expired_key
+   메시지 앞 120자: Authentication Error - Expired Key. Key Expiry time 2026-11-26 06:13:18.848000+00:00 and current time 2026-11-26 06:19:0
+c. 대조군 researcher_a 키 → gateway POST /v1/chat/completions (max_tokens 8)
+   HTTP 200, usage total_tokens 22
+
+# 판정: 통과. loadtest 키는 만료 뒤 gateway와 LiteLLM 모두에서 401(expired_key)로 거절됐다. 같은 시각 researcher_a는 200이다.
