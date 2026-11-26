@@ -24,6 +24,9 @@ services:
       - qwen3
     environment:
       HF_HUB_OFFLINE: "1"
+      VLLM_NO_USAGE_STATS: "1"
+      DO_NOT_TRACK: "1"
+      TRANSFORMERS_OFFLINE: "1"
     volumes:
       - /srv/models:/models:ro
     shm_size: "8gb"
@@ -71,6 +74,7 @@ services:
       LITELLM_SALT_KEY: ${LITELLM_SALT_KEY}
       DATABASE_URL: postgresql://litellm:${POSTGRES_PASSWORD}@db:5432/litellm
       LITELLM_LOCAL_MODEL_COST_MAP: "True"
+      LITELLM_TELEMETRY: "False"
     volumes:
       - ./litellm/config.yaml:/app/config.yaml:ro
     ports:
