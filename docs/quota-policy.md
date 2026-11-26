@@ -51,4 +51,4 @@
 | loadtest | 6,000 | 5,000,000 | 2026-11-26 06:13:18 | 만료 후 거절 확인(HTTP 401), [evidence/day4/loadtest-expiry.txt](../evidence/day4/loadtest-expiry.txt) |
 
 - 네 키 모두 `max_parallel_requests`는 null(동시 요청 수 제한 없음)이고, `models`는 `["qwen3-8b"]`다.
-- loadtest 키는 2026-11-26 06:13:18Z에 만료될 예정이다. 만료 뒤 401이 나오는지는 4일차 5단계 최종 점검에서 확인한다.
+- loadtest 키는 2026-11-26 06:13:18Z에 만료될 예정이다. 4일차 5b단계에서 확인했다(만료 343초 뒤 게이트웨이·LiteLLM 모두 401, evidence/day4/loadtest-expiry.txt).

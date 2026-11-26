@@ -98,7 +98,7 @@ flowchart LR
 | 1일차 | 서버 점검, 계정·SSH 강화, vLLM·LiteLLM 기동, 계정별 키와 429 | v0.1-day1 | [day1-log.md](docs/day1-log.md) |
 | 2일차 | FastAPI 게이트웨이: 식별, PII 마스킹, 감사 로그, Docker화, 오류 재현 | v0.2-day2 | [day2-log.md](docs/day2-log.md) |
 | 3일차 | 지표, Prometheus, Grafana, 부하 시험, 장애 재현 보고서 | v0.3-day3 | [day3-log.md](docs/day3-log.md) |
-| 4일차 | 알림 규칙, 한도 정책, 텔레메트리 끄기, 폐쇄망 시험, 백업·복구, 문서 | (진행 중) | [day4-log.md](docs/day4-log.md) |
+| 4일차 | 알림 규칙, 한도 정책, 텔레메트리 끄기, 폐쇄망 시험, 백업·복구, 문서 | v1.0 | [day4-log.md](docs/day4-log.md) |
 
 작업 방식: 단계마다 계획 → 실행 → 검증(판정 표) → 기록 → 커밋 순서로 진행했다. 전체 문서 목차는 [docs/README.md](docs/README.md)에 있다.
 
