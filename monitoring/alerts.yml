@@ -1,0 +1,35 @@
+groups:
+  - name: llm-platform
+    rules:
+      - alert: VLLMDown
+        expr: up{job="vllm"} == 0
+        for: 1m
+        labels:
+          severity: critical
+        annotations:
+          summary: "vLLM 수집 실패가 1분 넘게 이어짐. chat 요청이 500/504로 실패 중일 가능성이 높다."
+          runbook: docs/incidents/INC-001-vllm-crash.md
+      - alert: GatewayDown
+        expr: up{job="gateway"} == 0
+        for: 1m
+        labels:
+          severity: critical
+        annotations:
+          summary: "게이트웨이 /metrics 수집 실패가 1분 넘게 이어짐. 모든 API 요청이 실패할 수 있다."
+          runbook: docs/incidents/README.md
+      - alert: GPUHighTemperature
+        expr: nvidia_smi_temperature_gpu > 85
+        for: 2m
+        labels:
+          severity: warning
+        annotations:
+          summary: "GPU 온도가 2분 넘게 85℃를 넘음. 부하를 줄이고 냉각 상태를 확인한다."
+          runbook: docs/loadtest.md
+      - alert: KVCacheHigh
+        expr: vllm:kv_cache_usage_perc > 0.9
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "vLLM KV 캐시 사용률이 5분 넘게 90%를 넘음. 대기열이 쌓이고 지연이 커질 수 있다."
+          runbook: docs/loadtest.md

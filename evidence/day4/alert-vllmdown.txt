@@ -1,0 +1,25 @@
+# VLLMDown 알림 시험 (UTC). 규칙: up{job="vllm"} == 0, for 1m. evaluation_interval 15s, scrape_interval 15s
+# 열: 시각 | T0 기준 경과(초) | up{job=vllm} | /api/v1/alerts
+# T0=2026-11-26T02:53:37Z docker compose stop vllm
+# 02:53:38 stop 완료
+02:53:38 | 1 | 1 | []
+02:53:53 | 16 | 0 | []
+02:54:08 | 31 | 0 | [{"name":"VLLMDown","state":"pending","activeAt":"2026-11-26T02:54:01.881107964Z"}]
+02:54:23 | 46 | 0 | [{"name":"VLLMDown","state":"pending","activeAt":"2026-11-26T02:54:01.881107964Z"}]
+02:54:38 | 61 | 0 | [{"name":"VLLMDown","state":"pending","activeAt":"2026-11-26T02:54:01.881107964Z"}]
+02:54:53 | 76 | 0 | [{"name":"VLLMDown","state":"pending","activeAt":"2026-11-26T02:54:01.881107964Z"}]
+02:55:08 | 91 | 0 | [{"name":"VLLMDown","state":"firing","activeAt":"2026-11-26T02:54:01.881107964Z"}]
+02:55:23 | 106 | 0 | [{"name":"VLLMDown","state":"firing","activeAt":"2026-11-26T02:54:01.881107964Z"}]
+# firing 2번 연속 관측
+# 02:55:23 docker compose start vllm
+# 02:55:23 start 명령 반환
+02:55:28 | 106 | 0 | chat=500 | [{"name":"VLLMDown","state":"firing","activeAt":"2026-11-26T02:54:01.881107964Z"}]
+02:55:43 | 121 | 0 | chat=500 | [{"name":"VLLMDown","state":"firing","activeAt":"2026-11-26T02:54:01.881107964Z"}]
+02:55:58 | 136 | 0 | chat=500 | [{"name":"VLLMDown","state":"firing","activeAt":"2026-11-26T02:54:01.881107964Z"}]
+02:56:08 | 151 | 1 | chat=200 | [{"name":"VLLMDown","state":"firing","activeAt":"2026-11-26T02:54:01.881107964Z"}]
+# 02:56:08 첫 200
+02:56:23 | 166 | 1 | chat=200 | []
+# 02:56:23 VLLMDown 목록에서 사라짐(해제)
+# 정확한 전환 시각(query_range step 1s): up{job="vllm"} 02:53:49 0, 02:56:04 1
+# ALERTS{alertname="VLLMDown"}: pending 02:54:02 ~ 02:55:01, firing 02:55:02 ~ 02:56:16 (해제 평가 약 02:56:17)
+# T0 기준: up=0 12초, pending 25초, firing 85초, vllm start 106초, up=1 147초, 첫 200 151초, 해제 약 160초
