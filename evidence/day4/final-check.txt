@@ -1,0 +1,23 @@
+# 4일차 5a단계 최종 점검 (2026-11-26 04:02Z, 브랜치 feat/day4-ops)
+# 경로의 홈 폴더는 ~로 적었다. 키 값과 .env 값은 넣지 않았다.
+
+| # | 항목 | 기준 | 실측 | 판정 |
+|---|---|---|---|---|
+| 1 | pytest | 전부 통과 | 53 passed, 1 warning | 통과 |
+| 2 | ruff | 0건 | All checks passed! | 통과 |
+| 3 | gitleaks(scripts/check_secrets.sh) | 새 건 0 | no leaks found | 통과 |
+| 4 | 컨테이너 | 7개 running, healthcheck 있는 것은 healthy | 7개 Up 43분, litellm-db·llm-gateway·vllm healthy | 통과 |
+| 5 | docker 포트 | 스택 컨테이너에 0.0.0.0, ::: 없음 | 0건(litellm 127.0.0.1:4000, prometheus 127.0.0.1:9090, llm-gateway 127.0.0.1:18080, grafana 127.0.0.1:3000, 나머지 3개는 호스트 포트 없음) | 통과 |
+| 6 | ss -ltn | 18080, 4000, 9090, 3000이 127.0.0.1에만 | 127.0.0.1:18080, 127.0.0.1:3000, 127.0.0.1:4000, 127.0.0.1:9090 (다른 주소 0) | 통과 |
+| 7 | .env 권한 | 600 | 600 .env | 통과 |
+| 8 | 키 폴더·파일 권한 | 폴더 700, 파일 600 | 700 ~/llm-keys, 600 × 4 (admin, loadtest, researcher_a, researcher_b) | 통과 |
+| 9 | 백업 폴더 권한 | 700 | 700 ~/llm-backups | 통과 |
+| 10 | 저장소에 비밀 파일 | git ls-files 의 .env / *.key / *.dump 0건 | 0건 | 통과 |
+| 11 | 원격 태그 | v0.1-day1, v0.2-day2, v0.3-day3 | 3개 모두 있음(git ls-remote --tags origin) | 통과 |
+| 12 | Prometheus 타깃 | 4개 up | gateway, gpu, prometheus, vllm 모두 up | 통과 |
+| 13 | 알림 규칙 | 4개 health ok | VLLMDown, GatewayDown, GPUHighTemperature, KVCacheHigh 모두 ok(inactive) | 통과 |
+| 14 | firing 알림 | 0개 | 0개 | 통과 |
+| 15 | Markdown 상대 링크 | 깨짐 0 | 저장소 전체 .md의 상대 링크 134개 중 깨짐 0 | 통과 |
+| 16 | 서버 IP·홈 경로 문자열 | git grep(추적+새 파일, uv.lock 제외) 0건 | 0건 | 통과 |
+
+결과: 16개 중 16개 통과

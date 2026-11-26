@@ -79,6 +79,7 @@ flowchart LR
 - 장애 대응: 타임라인·탐지·원인·조치·재발 방지 보고서 → [incidents/](docs/incidents/README.md)
 - 백업·복구: `scripts/backup.sh`, `scripts/restore_test.sh`, 운영 복구 절차 → [backup.md](docs/backup.md)
 - 폐쇄망: `scripts/offline_check.sh`, 끈 텔레메트리, 반입 절차 → [offline.md](docs/offline.md)
+- 시연 순서: [docs/demo.md](docs/demo.md)
 
 ## 보안 설계 요약
 

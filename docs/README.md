@@ -19,6 +19,7 @@
 | [loadtest.md](loadtest.md) | Locust 부하 시험(동시 사용자 1/8/32명) 조건, 결과, 해석 |
 | [offline.md](offline.md) | 폐쇄망 기동 시험 방법과 결과, 끈 텔레메트리, 반입 절차, 한계 |
 | [backup.md](backup.md) | 백업 대상과 제외 이유, 보안, 복구 시험 실측, 운영 복구 절차, 주기 제안 |
+| [demo.md](demo.md) | 녹화용 시연 순서(장면 7개), 녹화 전 준비 |
 | [incidents/README.md](incidents/README.md) | 장애 목록 |
 | [incidents/INC-001-vllm-crash.md](incidents/INC-001-vllm-crash.md) | vLLM 컨테이너 강제 종료(중단 124초, 수동 복구) |
 | [incidents/INC-002-gpu-memory.md](incidents/INC-002-gpu-memory.md) | GPU 메모리 부족으로 vLLM 기동 실패(중단 101초, 자동 재기동) |
@@ -52,3 +53,5 @@
 | [day4/backup-run.txt](../evidence/day4/backup-run.txt) | 기준 백업 실행 출력과 manifest |
 | [day4/backup-key-check.txt](../evidence/day4/backup-key-check.txt) | 덤프 안 실제 키 문자열 개수(모두 0) |
 | [day4/restore-run.txt](../evidence/day4/restore-run.txt) | 임시 컨테이너 복구 시험 출력(9/9 일치) |
+| [day4/demo-dryrun.txt](../evidence/day4/demo-dryrun.txt) | 시연 스크립트 예행 출력(PII 헤더, 429, 규칙 4개) |
+| [day4/final-check.txt](../evidence/day4/final-check.txt) | 4일차 5a단계 최종 점검표 |
