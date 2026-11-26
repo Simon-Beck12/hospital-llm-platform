@@ -1,0 +1,26 @@
+# 복구 시험 시작 2026-11-26T03:31:52Z, 백업 ~/llm-backups/20261126T033123Z
+## a. 무결성
+sha256sum -c: ok
+## b. PostgreSQL (pg-restore-test, --network none)
+pg_isready: ok
+pg_restore 종료 코드: 0, 오류 줄: 0
+## c. 감사 로그
+첫 줄 JSON 파싱: ok (필드 수 17)
+## d. Grafana (grafana-restore-test, 127.0.0.1:13000)
+api/health database: ok
+admin 로그인 /api/user: 200
+## 결과
+| 항목 | 백업 | 복구 | 결과 |
+|---|---|---|---|
+| 무결성(SHA256SUMS) | ok | ok | 일치 |
+| PG 행 수 LiteLLM_VerificationToken | 4 | 4 | 일치 |
+| PG 행 수 LiteLLM_UserTable | 0 | 0 | 일치 |
+| PG 행 수 LiteLLM_SpendLogs | 3157 | 3157 | 일치 |
+| 감사 로그 줄 수 | 3127 | 3127 | 일치 |
+| 감사 로그 첫 줄 JSON | ok | ok | 일치 |
+| grafana.db 크기(바이트) | 1699840 | 1699840 | 일치 |
+| Grafana DB(api/health) | ok | ok | 일치 |
+| Grafana admin 로그인(/api/user) | 200 | 200 | 일치 |
+일치 9개 중 9개
+걸린 시간: 11초
+판정: 통과

@@ -103,7 +103,7 @@ $ command -v openssl
 /usr/bin/openssl
 
 $ command -v uv
-/home/beck/.local/bin/uv
+~/.local/bin/uv
 
 $ command -v docker
 /usr/bin/docker
@@ -158,7 +158,7 @@ $ ps -o pid,comm -p 7021,7140,15809,7980
 | 가중치 파일 일치 | index.json weight_map과 diff 없음 | 5개 일치 (model-0000{1..5}-of-00005), config/tokenizer/generation_config 존재 | 통과 |
 | 모델 크기 | 15~17G | 16G (du -sh), 16,397,465,974 bytes | 통과 |
 | 다운로드 소요 시간 | 30분 이내 | 약 4분 (20:44:30 시작 → 20:48:34 로그 마지막 기록) | 통과 |
-| 서버 IP | 조회됨 | enp6s0 172.30.1.44/24 | 통과 |
+| 서버 IP | 조회됨 | enp6s0 <서버IP>/24 | 통과 |
 
 메모
 - hf CLI: huggingface_hub 2.4.0 (`uv tool install`, `hf version` → version=2.4.0). 2.4.0에는 `[cli]` extra가 없어 경고가 났지만 hf는 설치됨.
@@ -201,7 +201,7 @@ $ du -sh .
 16G	.
 
 $ ip -4 -brief addr | grep -v '^lo'
-enp6s0           UP             172.30.1.44/24 
+enp6s0           UP             <서버IP>/24 
 br-e5378fa6218e  UP             172.18.0.1/16 
 docker0          DOWN           172.17.0.1/16 
 ```
@@ -219,7 +219,7 @@ docker0          DOWN           172.17.0.1/16
 | maxauthtries | 3 | 3 | 통과 |
 | localhost 비밀번호 로그인 | Permission denied (publickey) | beck@localhost: Permission denied (publickey). 종료 코드 255 | 통과 |
 | 노트북 키 로그인 | key-login-ok | key-login-ok | 통과 |
-| 노트북 비밀번호 로그인 | Permission denied (publickey) | beck@172.30.1.44: Permission denied (publickey). | 통과 |
+| 노트북 비밀번호 로그인 | Permission denied (publickey) | beck@<서버IP>: Permission denied (publickey). | 통과 |
 | researcher_a docker 접근 | permission denied | permission denied ... docker.sock | 통과 |
 | 노트북 키 로그인 계정 수 | 4 (beck, admin, researcher_a, researcher_b) | 4 (whoami 출력 4개) | 통과 |
 | sshd 로그 Accepted publickey 계정 수 | 4 | 4 (beck 3회, researcher_a 2회, admin 1회, researcher_b 1회) | 통과 |
@@ -264,20 +264,20 @@ beck@localhost: Permission denied (publickey).
 (exit=255)
 
 $ journalctl -u ssh --since "2 hours ago" --no-pager | grep -Ei "Accepted publickey|Failed|Disconnected" | tail -20
-11월 23 21:48:10 beck sshd[163232]: Failed password for beck from 172.30.1.34 port * ssh2
-11월 23 21:48:14 beck sshd[163232]: Failed password for beck from 172.30.1.34 port * ssh2
-11월 23 21:49:44 beck sshd[163654]: Failed password for beck from 172.30.1.34 port * ssh2
-11월 23 21:49:48 beck sshd[163654]: Failed password for beck from 172.30.1.34 port * ssh2
-11월 23 21:49:52 beck sshd[163654]: Failed password for beck from 172.30.1.34 port * ssh2
-11월 23 22:40:25 beck sshd[180261]: Failed password for beck from 172.30.1.34 port * ssh2
+11월 23 21:48:10 beck sshd[163232]: Failed password for beck from <사설IP> port * ssh2
+11월 23 21:48:14 beck sshd[163232]: Failed password for beck from <사설IP> port * ssh2
+11월 23 21:49:44 beck sshd[163654]: Failed password for beck from <사설IP> port * ssh2
+11월 23 21:49:48 beck sshd[163654]: Failed password for beck from <사설IP> port * ssh2
+11월 23 21:49:52 beck sshd[163654]: Failed password for beck from <사설IP> port * ssh2
+11월 23 22:40:25 beck sshd[180261]: Failed password for beck from <사설IP> port * ssh2
 11월 23 22:45:44 beck sshd[182874]: Failed password for beck from 127.0.0.1 port * ssh2
-11월 23 22:52:12 beck sshd[186253]: Accepted publickey for beck from 172.30.1.34 port * ssh2: ED25519 SHA256:of0UT7dZcYDT9794z76I/2kERfPne7tHdUpV+J6It0M
-11월 23 22:52:18 beck sshd[186324]: Accepted publickey for admin from 172.30.1.34 port * ssh2: ED25519 SHA256:88aWABPukuqrSlI8228BzsCCZmg0PRB8La8ewEwBT5g
-11월 23 22:52:18 beck sshd[186631]: Accepted publickey for researcher_a from 172.30.1.34 port * ssh2: ED25519 SHA256:7cmJSpM20BoppPTdlnuV78j6EKtuEeLOTsv9/s7c5Ig
-11월 23 22:55:26 beck sshd[188481]: Accepted publickey for researcher_b from 172.30.1.34 port * ssh2: ED25519 SHA256:ewdNGlCy8BZ6/prq9pOWlIGMrRShBBJzmyKASQBReSA
-11월 23 23:10:53 beck sshd[193405]: Accepted publickey for beck from 172.30.1.34 port * ssh2: ED25519 SHA256:of0UT7dZcYDT9794z76I/2kERfPne7tHdUpV+J6It0M
-11월 23 23:16:52 beck sshd[195738]: Accepted publickey for beck from 172.30.1.34 port * ssh2: ED25519 SHA256:of0UT7dZcYDT9794z76I/2kERfPne7tHdUpV+J6It0M
-11월 23 23:17:43 beck sshd[196201]: Accepted publickey for researcher_a from 172.30.1.34 port * ssh2: ED25519 SHA256:7cmJSpM20BoppPTdlnuV78j6EKtuEeLOTsv9/s7c5Ig
+11월 23 22:52:12 beck sshd[186253]: Accepted publickey for beck from <사설IP> port * ssh2: ED25519 SHA256:of0UT7dZcYDT9794z76I/2kERfPne7tHdUpV+J6It0M
+11월 23 22:52:18 beck sshd[186324]: Accepted publickey for admin from <사설IP> port * ssh2: ED25519 SHA256:88aWABPukuqrSlI8228BzsCCZmg0PRB8La8ewEwBT5g
+11월 23 22:52:18 beck sshd[186631]: Accepted publickey for researcher_a from <사설IP> port * ssh2: ED25519 SHA256:7cmJSpM20BoppPTdlnuV78j6EKtuEeLOTsv9/s7c5Ig
+11월 23 22:55:26 beck sshd[188481]: Accepted publickey for researcher_b from <사설IP> port * ssh2: ED25519 SHA256:ewdNGlCy8BZ6/prq9pOWlIGMrRShBBJzmyKASQBReSA
+11월 23 23:10:53 beck sshd[193405]: Accepted publickey for beck from <사설IP> port * ssh2: ED25519 SHA256:of0UT7dZcYDT9794z76I/2kERfPne7tHdUpV+J6It0M
+11월 23 23:16:52 beck sshd[195738]: Accepted publickey for beck from <사설IP> port * ssh2: ED25519 SHA256:of0UT7dZcYDT9794z76I/2kERfPne7tHdUpV+J6It0M
+11월 23 23:17:43 beck sshd[196201]: Accepted publickey for researcher_a from <사설IP> port * ssh2: ED25519 SHA256:7cmJSpM20BoppPTdlnuV78j6EKtuEeLOTsv9/s7c5Ig
 
 $ ssh-keygen -lf /etc/ssh/ssh_host_ed25519_key.pub
 256 SHA256:G9IN8lsHyGiOmvHi2ok1LJk0X8omyyiB4YlXKc+PUB8 root@beck (ED25519)
@@ -301,7 +301,7 @@ researcher_b
 PS> ssh llm-me "echo key-login-ok"
 key-login-ok
 PS> ssh -o PubkeyAuthentication=no -o PreferredAuthentications=password llm-me
-beck@172.30.1.44: Permission denied (publickey).
+beck@<서버IP>: Permission denied (publickey).
 PS> ssh llm-researcher-a "groups; docker ps"
 researcher_a users llm-users
 permission denied while trying to connect to the docker API at unix:///var/run/docker.sock
@@ -443,7 +443,7 @@ $ docker ps -a --format '{{.Names}}' | grep -xE 'vllm|litellm|litellm-db' || ech
 
 $ docker compose ls
 NAME                STATUS              CONFIG FILES
-frappe_docker       running(9)          /home/beck/바탕화면/epr/frappe_docker/pwd.yml,/home/beck/바탕화면/epr/erpnext-ops-agent/infra/pwd.override.yml
+frappe_docker       running(9)          ~/바탕화면/epr/frappe_docker/pwd.yml,~/바탕화면/epr/erpnext-ops-agent/infra/pwd.override.yml
 (exit=0)
 
 ```
@@ -667,9 +667,9 @@ $ curl -s .../v1/chat/completions (마스터 키, "서울의 수도 기능을 �
 }
 
 $ ./scripts/issue_keys.sh
-발급: admin (rpm=1000, tpm=1000000) -> /home/beck/llm-keys/admin.key
-발급: researcher_a (rpm=20, tpm=20000) -> /home/beck/llm-keys/researcher_a.key
-발급: researcher_b (rpm=5, tpm=2000) -> /home/beck/llm-keys/researcher_b.key
+발급: admin (rpm=1000, tpm=1000000) -> ~/llm-keys/admin.key
+발급: researcher_a (rpm=20, tpm=20000) -> ~/llm-keys/researcher_a.key
+발급: researcher_b (rpm=5, tpm=2000) -> ~/llm-keys/researcher_b.key
 (exit=0)
 $ ls -l ~/llm-keys
 합계 12

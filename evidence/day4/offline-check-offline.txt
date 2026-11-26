@@ -1,0 +1,43 @@
+# 폐쇄망 기동 시험 (mode=offline, 시작 2026-11-26T03:18:22Z)
+## 1. 인터넷 차단 확인
+curl https://huggingface.co: 실패(차단)
+getent hosts github.com: 실패(정상, DNS 차단)
+## 2. 스택 stop -> start
+stop 완료 2026-11-26T03:18:24Z
+start 시작 2026-11-26T03:18:24Z
+10s: 정상 3/7
+20s: 정상 4/7
+30s: 정상 4/7
+41s: 정상 6/7
+51s: 정상 6/7
+61s: 정상 7/7
+gpu-exporter Up About a minute
+grafana Up About a minute
+litellm Up 24 seconds
+litellm-db Up About a minute (healthy)
+llm-gateway Up 24 seconds (healthy)
+prometheus Up About a minute
+vllm Up About a minute (healthy)
+전부 정상까지: 61초
+## 3. 게이트웨이 응답 (researcher_a)
+whoami: HTTP 200, 0.067785초
+chat: HTTP 200, 0.334406초
+## 4. Prometheus 타깃
+[{"job":"gateway","health":"up"},{"job":"gpu","health":"up"},{"job":"prometheus","health":"up"},{"job":"vllm","health":"up"}]
+타깃 up: 4/4
+## 5. 외부 접속 시도 로그 (since 2026-11-26T03:18:24Z)
+패턴 일치 전체: 10줄 (그중 vLLM KV 캐시 통계 줄 0줄 제외)
+외부 접속 시도 의심 줄: 10줄
+litellm  | 2026-11-26 03:19:09,633 - litellm_proxy_extras - INFO - Using v2 migration resolver (--use_v2_migration_resolver)
+litellm  | #        https://github.com/BerriAI/litellm/issues/new        #
+litellm  | Give Feedback / Get Help: https://github.com/BerriAI/litellm/issues/new
+prometheus    | time=2026-11-26T03:18:25.378Z level=INFO source=memlimit.go:198 msg="GOMEMLIMIT is updated" component=automemlimit package=github.com/KimMachineGun/automemlimit/memlimit GOMEMLIMIT=121462843392 previous=9223372036854775807
+vllm          | (APIServer pid=1) INFO 11-26 03:18:32 [model.py:744] Resolved architecture: Qwen3ForCausalLM
+vllm          | (EngineCore pid=168) INFO 11-26 03:18:57 [gpu_worker.py:1066] Free memory on device (28.87/31.32 GiB) on startup. Desired GPU memory utilization is (0.85, 26.63 GiB). Actual usage is 15.5 GiB for consumed memory (weights + n
+grafana       | logger=infra.usagestats.collector t=2026-11-26T03:18:26.630477942Z level=info msg="registering usage stat providers" usageStatsProvidersLen=2
+grafana       | logger=storage.unified.migrations t=2026-11-26T03:18:26.961242612Z level=info msg="Resolved storage mode from migration log" resource=preferences.preferences.grafana.app mode=unified
+grafana       | logger=storage.unified.migrations t=2026-11-26T03:18:26.966820556Z level=info msg="Resolved storage mode from migration log" resource=shorturls.shorturl.grafana.app mode=unified
+grafana       | logger=backgroundsvcs.managerAdapter t=2026-11-26T03:18:27.431352403Z level=info msg=starting module=*service.UsageStats
+## 판정
+판정: 통과
+완료

@@ -1,0 +1,74 @@
+
+==================================================================
+[장면 1] 스택 상태
+  Docker Compose 7개 서비스가 떠 있고, healthcheck가 있는 3개는 healthy인지 본다.
+==================================================================
+NAME           STATUS
+gpu-exporter   Up 42 minutes
+grafana        Up 42 minutes
+litellm        Up 42 minutes
+litellm-db     Up 42 minutes (healthy)
+llm-gateway    Up 42 minutes (healthy)
+prometheus     Up 42 minutes
+vllm           Up 42 minutes (healthy)
+
+==================================================================
+[장면 2] 계정 식별
+  게이트웨이는 마스터 키 없이, 요청자 본인 키로 LiteLLM에 물어 계정을 알아낸다.
+==================================================================
+{
+  "user_id": "researcher_a",
+  "key_alias": "researcher_a",
+  "request_id": "eabb4fff2cc7494aa27524afe682966e"
+}
+
+==================================================================
+[장면 3] PII 마스킹
+  주민번호·전화번호를 모델에 보내기 전에 가린다. 응답 헤더 X-PII-Masked에 건수가 나온다(가짜 값).
+==================================================================
+HTTP 200
+x-request-id: 7faa9253d542483b99ceec7794d66d67
+x-pii-masked: 2
+응답 본문 앞 200자: 가짜 환자 홍길동의 정보를 요약하면 다음과 같습니다:
+
+- **이름**: 홍길동  
+- **주민번호**: [주민번호]  
+- **연락처**: [전화번호]  
+
+필요에 따라 추가 정보를 제공해
+
+==================================================================
+[장면 4] 사용량 한도
+  researcher_b는 분당 5회 한도다. 7회 연속 보내면 6회째부터 429와 Retry-After가 나온다.
+==================================================================
+researcher_b는 분당 5회 한도
+1회: HTTP 200
+2회: HTTP 200
+3회: HTTP 200
+4회: HTTP 200
+5회: HTTP 200
+6회: HTTP 429, Retry-After: 60초
+7회: HTTP 429, Retry-After: 60초
+
+==================================================================
+[장면 5] 감사 로그
+  요청마다 JSON 한 줄을 남긴다. 프롬프트 본문은 없고, 마스킹 후 해시(prompt_sha256)만 남는다.
+==================================================================
+{"ts":"2026-11-26T04:01:24.943Z","user_id":"researcher_b","key_alias":"researcher_b","status":200,"pii_counts":{"rrn":0,"phone":0,"mrn":0,"email":0},"prompt_sha256":"046dc8bce4781c814ee659ba9e7886b8c68ce85b971d606fdde023914a7f21cd"}
+{"ts":"2026-11-26T04:01:24.961Z","user_id":"researcher_b","key_alias":"researcher_b","status":429,"pii_counts":{"rrn":0,"phone":0,"mrn":0,"email":0},"prompt_sha256":"046dc8bce4781c814ee659ba9e7886b8c68ce85b971d606fdde023914a7f21cd"}
+{"ts":"2026-11-26T04:01:24.978Z","user_id":"researcher_b","key_alias":"researcher_b","status":429,"pii_counts":{"rrn":0,"phone":0,"mrn":0,"email":0},"prompt_sha256":"046dc8bce4781c814ee659ba9e7886b8c68ce85b971d606fdde023914a7f21cd"}
+
+==================================================================
+[장면 6] 알림 규칙
+  Prometheus 알림 규칙 4개의 상태(inactive/pending/firing)와 health를 본다.
+==================================================================
+VLLMDown	inactive	ok
+GatewayDown	inactive	ok
+GPUHighTemperature	inactive	ok
+KVCacheHigh	inactive	ok
+
+==================================================================
+[장면 7] 대시보드
+  브라우저에서 Grafana 대시보드(http://127.0.0.1:3000/d/llm-platform)를 보여 주세요
+==================================================================
+시연 끝

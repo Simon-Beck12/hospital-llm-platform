@@ -1,0 +1,17 @@
+# 백업 시작 2026-11-26T03:30:45Z -> ~/llm-backups/20261126T033045Z
+litellm.dump 완료
+auditlogs.tar.gz 완료
+tar: .: file changed as we read it
+## manifest
+backup_utc=20261126T033045Z
+pg_database=litellm
+rows.LiteLLM_VerificationToken=4
+rows.LiteLLM_UserTable=0
+rows.LiteLLM_SpendLogs=3157
+audit_lines=3127
+grafana_db_bytes=1699840
+file.litellm.dump=1194836
+file.auditlogs.tar.gz=120145
+file.grafanadata.tar.gz=127551726
+## 걸린 시간: 14초
+## 폴더: ~/llm-backups/20261126T033045Z
