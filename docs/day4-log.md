@@ -58,3 +58,21 @@ firing  2026-11-26T02:55:02Z ~ 2026-11-26T02:56:16Z
 | 오프라인 chat | 200 | 200(0.334초), whoami 200 | 통과 |
 
 - 외부 접속 로그: 패턴 일치 10줄, 실제 외부 접속 시도 0줄(오탐 분류는 offline.md). 오프라인 시험 후 인터넷을 복구한 뒤에도 github는 200, 컨테이너 7개는 정상, chat은 200이었다.
+
+## 3단계 백업과 복구 시험
+
+- 사전 조사: DB 사용자와 DB 이름은 litellm/litellm이다. 볼륨은 `llm-platform_{auditlogs,grafanadata,pgdata}`다. 이미지 postgres:16.16, grafana/grafana:13.3.1, llm-gateway:day2가 모두 로컬에 있다. 행 수는 VerificationToken 4, UserTable 0, SpendLogs 3,157이다.
+- 백업: [scripts/backup.sh](../scripts/backup.sh)로 만든 `~/llm-backups/20261126T033123Z`(14초)를 기준으로 쓴다. 첫 실행(`20261126T033045Z`)에서는 Grafana tar의 종료 코드 1("file changed as we read it")을 `&&` 때문에 놓쳤다. 종료 코드 1은 경고(manifest `warnings`), 2 이상은 중단하도록 고쳐 1번 더 돌렸다. 첫 백업 폴더는 지우지 않고 남겨 두었다.
+- 복구 시험: [scripts/restore_test.sh](../scripts/restore_test.sh)를 돌렸다. 임시 PostgreSQL은 `--network none`, 임시 Grafana는 127.0.0.1:13000이다. 9개 항목이 모두 일치했고 11초 걸렸다. 끝난 뒤 trap으로 임시 컨테이너 2개와 볼륨 1개를 지웠다.
+- 문서: [backup.md](backup.md)
+
+| 항목 | 기준 | 실측 | 판정 |
+|---|---|---|---|
+| 권한 700/600 | 폴더 700, 파일 600 | `~/llm-backups`와 백업 폴더 2개 700, 파일 5개 600 | 통과 |
+| 덤프 키 0건 | 4개 키 모두 0 | admin 0, loadtest 0, researcher_a 0, researcher_b 0 | 통과 |
+| 무결성 | `sha256sum -c` ok | ok | 통과 |
+| PG 행 수 3개 | manifest와 같음 | 4/4, 0/0, 3,157/3,157 | 통과 |
+| 감사 로그 줄 수 | manifest와 같음 | 3,127/3,127, 첫 줄 JSON(17필드) | 통과 |
+| Grafana DB·로그인 | api/health ok, /api/user 200 | ok, 200(grafana.db 1,699,840 B 일치) | 통과 |
+| 임시 자원 정리 | restore-test 컨테이너·볼륨 0 | 0 | 통과 |
+| 운영 영향 없음 | 7개 정상(재시작 없음), chat 200 | 7개 Up 13분(백업 전부터 계속), chat 200 | 통과 |

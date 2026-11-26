@@ -1,0 +1,8 @@
+# 덤프 안 실제 키 문자열 개수 (2026-11-26T03:31:44Z). 대상: ~/llm-backups/20261126T033123Z/litellm.dump
+# 방법: docker exec -i litellm-db pg_restore -f - < litellm.dump | grep -cF <키>. 키 값은 출력하지 않음.
+# SQL 변환 결과 12687줄
+admin 0
+loadtest 0
+researcher_a 0
+researcher_b 0
+# 참고: LiteLLM_VerificationToken.token 열은 4행 모두 64자리 16진수(키의 SHA-256 해시 형식)로, 원래 키 문자열이 아님
